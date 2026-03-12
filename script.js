@@ -1,107 +1,107 @@
-document.addEventListener("DOMContentLoaded", () => {
+// document.addEventListener("DOMContentLoaded", () => {
 
 
-  const moviesOriginal = [
-    { title: "The Shawshank Redemption", genre: "Drama", rating: "9.3" },
-    { title: "The Godfather", genre: "Crime", rating: "9.2" },
-    { title: "The Dark Knight", genre: "Action", rating: "9.0" },
-    { title: "Pulp Fiction", genre: "Crime", rating: "8.9" },
-    { title: "Schindler's List", genre: "Drama", rating: "8.9" },
-  ]
+//   const moviesOriginal = [
+//     { title: "The Shawshank Redemption", genre: "Drama", rating: "9.3" },
+//     { title: "The Godfather", genre: "Crime", rating: "9.2" },
+//     { title: "The Dark Knight", genre: "Action", rating: "9.0" },
+//     { title: "Pulp Fiction", genre: "Crime", rating: "8.9" },
+//     { title: "Schindler's List", genre: "Drama", rating: "8.9" },
+//   ]
 
-  const seriesOriginal = [
-    { title: "Breaking Bad", genre: "Drama", rating: "9.5" },
-    { title: "Game of Thrones", genre: "Fantasy", rating: "9.3" },
-    { title: "The Sopranos", genre: "Crime", rating: "9.2" },
-    { title: "The Wire", genre: "Crime", rating: "8.8" },
-    { title: "Mad Men", genre: "Drama", rating: "8.6" },
-  ]
+//   const seriesOriginal = [
+//     { title: "Breaking Bad", genre: "Drama", rating: "9.5" },
+//     { title: "Game of Thrones", genre: "Fantasy", rating: "9.3" },
+//     { title: "The Sopranos", genre: "Crime", rating: "9.2" },
+//     { title: "The Wire", genre: "Crime", rating: "8.8" },
+//     { title: "Mad Men", genre: "Drama", rating: "8.6" },
+//   ]
 
-  searchButtonOriginal.addEventListener("click", searchOriginal)
+//   searchButtonOriginal.addEventListener("click", searchOriginal)
 
-  searchInputOriginal.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      searchOriginal()
-    }
-  })
+//   searchInputOriginal.addEventListener("keydown", (event) => {
+//     if (event.key === "Enter") {
+//       searchOriginal()
+//     }
+//   })
 
-  function searchOriginal() {
-    const searchQueryOriginal = searchInputOriginal.value.trim()
-    const mediaTypeOriginal = mediaTypeSelectOriginal.value
-    const searchByOriginal = searchBySelectOriginal.value
+//   function searchOriginal() {
+//     const searchQueryOriginal = searchInputOriginal.value.trim()
+//     const mediaTypeOriginal = mediaTypeSelectOriginal.value
+//     const searchByOriginal = searchBySelectOriginal.value
 
-    if (!searchQueryOriginal) {
-      displayResultsOriginal("Please enter a search query.")
-      return
-    }
+//     if (!searchQueryOriginal) {
+//       displayResultsOriginal("Please enter a search query.")
+//       return
+//     }
 
-    const searchResultsOriginal = searchMediaOriginal(searchQueryOriginal, mediaTypeOriginal, searchByOriginal)
+//     const searchResultsOriginal = searchMediaOriginal(searchQueryOriginal, mediaTypeOriginal, searchByOriginal)
 
-    if (searchResultsOriginal.length > 0) {
-      displayResultsOriginal(searchResultsOriginal)
-    } else {
-      displayResultsOriginal("No results found.")
-    }
-  }
+//     if (searchResultsOriginal.length > 0) {
+//       displayResultsOriginal(searchResultsOriginal)
+//     } else {
+//       displayResultsOriginal("No results found.")
+//     }
+//   }
 
-  function searchMediaOriginal(searchQueryOriginal, mediaTypeOriginal, searchByOriginal) {
-    let resultsOriginal = []
+//   function searchMediaOriginal(searchQueryOriginal, mediaTypeOriginal, searchByOriginal) {
+//     let resultsOriginal = []
 
-    if (mediaTypeOriginal === "movie" || mediaTypeOriginal === "all") {
-      resultsOriginal = resultsOriginal.concat(
-        moviesOriginal.filter((movieOriginal) => {
-          if (searchByOriginal === "title") {
-            return movieOriginal.title.toLowerCase().includes(searchQueryOriginal.toLowerCase())
-          } else if (searchByOriginal === "genre") {
-            return movieOriginal.genre.toLowerCase().includes(searchQueryOriginal.toLowerCase())
-          } else if (searchByOriginal === "rating") {
-            const ratingOriginal = Number.parseFloat(searchQueryOriginal)
-            if (isNaN(ratingOriginal)) return false
-            return movieOriginal.rating !== undefined && Number.parseFloat(movieOriginal.rating) === ratingOriginal
-          }
-          return false
-        }),
-      )
-    }
+//     if (mediaTypeOriginal === "movie" || mediaTypeOriginal === "all") {
+//       resultsOriginal = resultsOriginal.concat(
+//         moviesOriginal.filter((movieOriginal) => {
+//           if (searchByOriginal === "title") {
+//             return movieOriginal.title.toLowerCase().includes(searchQueryOriginal.toLowerCase())
+//           } else if (searchByOriginal === "genre") {
+//             return movieOriginal.genre.toLowerCase().includes(searchQueryOriginal.toLowerCase())
+//           } else if (searchByOriginal === "rating") {
+//             const ratingOriginal = Number.parseFloat(searchQueryOriginal)
+//             if (isNaN(ratingOriginal)) return false
+//             return movieOriginal.rating !== undefined && Number.parseFloat(movieOriginal.rating) === ratingOriginal
+//           }
+//           return false
+//         }),
+//       )
+//     }
 
-    if (mediaTypeOriginal === "series" || mediaTypeOriginal === "all") {
-      resultsOriginal = resultsOriginal.concat(
-        seriesOriginal.filter((serieOriginal) => {
-          if (searchByOriginal === "title") {
-            return serieOriginal.title.toLowerCase().includes(searchQueryOriginal.toLowerCase())
-          } else if (searchByOriginal === "genre") {
-            return serieOriginal.genre.toLowerCase().includes(searchQueryOriginal.toLowerCase())
-          } else if (searchByOriginal === "rating") {
-            const ratingOriginal = Number.parseFloat(searchQueryOriginal)
-            if (isNaN(ratingOriginal)) return false
-            return serieOriginal.rating !== undefined && Number.parseFloat(serieOriginal.rating) === ratingOriginal
-          }
-          return false
-        }),
-      )
-    }
+//     if (mediaTypeOriginal === "series" || mediaTypeOriginal === "all") {
+//       resultsOriginal = resultsOriginal.concat(
+//         seriesOriginal.filter((serieOriginal) => {
+//           if (searchByOriginal === "title") {
+//             return serieOriginal.title.toLowerCase().includes(searchQueryOriginal.toLowerCase())
+//           } else if (searchByOriginal === "genre") {
+//             return serieOriginal.genre.toLowerCase().includes(searchQueryOriginal.toLowerCase())
+//           } else if (searchByOriginal === "rating") {
+//             const ratingOriginal = Number.parseFloat(searchQueryOriginal)
+//             if (isNaN(ratingOriginal)) return false
+//             return serieOriginal.rating !== undefined && Number.parseFloat(serieOriginal.rating) === ratingOriginal
+//           }
+//           return false
+//         }),
+//       )
+//     }
 
-    return resultsOriginal
-  }
+//     return resultsOriginal
+//   }
 
-  function displayResultsOriginal(resultsOriginal) {
-    resultsContainerOriginal.innerHTML = ""
+//   function displayResultsOriginal(resultsOriginal) {
+//     resultsContainerOriginal.innerHTML = ""
 
-    if (typeof resultsOriginal === "string") {
-      const messageOriginal = document.createElement("p")
-      messageOriginal.textContent = resultsOriginal
-      resultsContainerOriginal.appendChild(messageOriginal)
-    } else {
-      const listOriginal = document.createElement("ul")
-      resultsOriginal.forEach((resultOriginal) => {
-        const itemOriginal = document.createElement("li")
-        itemOriginal.textContent = `${resultOriginal.title} (${resultOriginal.genre}, Rating: ${resultOriginal.rating})`
-        listOriginal.appendChild(itemOriginal)
-      })
-      resultsContainerOriginal.appendChild(listOriginal)
-    }
-  }
-})
+//     if (typeof resultsOriginal === "string") {
+//       const messageOriginal = document.createElement("p")
+//       messageOriginal.textContent = resultsOriginal
+//       resultsContainerOriginal.appendChild(messageOriginal)
+//     } else {
+//       const listOriginal = document.createElement("ul")
+//       resultsOriginal.forEach((resultOriginal) => {
+//         const itemOriginal = document.createElement("li")
+//         itemOriginal.textContent = `${resultOriginal.title} (${resultOriginal.genre}, Rating: ${resultOriginal.rating})`
+//         listOriginal.appendChild(itemOriginal)
+//       })
+//       resultsContainerOriginal.appendChild(listOriginal)
+//     }
+//   }
+// })
 
 // إضافة مستمع أحداث للأخطاء غير المعالجة
 window.addEventListener("error", (event) => {
