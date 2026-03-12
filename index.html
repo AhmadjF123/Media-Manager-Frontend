@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movie & Series Manager</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        .table-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        #results-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        #results-table thead {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.1);
+        }
+
+        .dark-theme #results-table thead {
+            background-color: #333;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="logo">
+                <i class="fas fa-film"></i>
+                <h1>Movie & Series Manager</h1>
+            </div>
+            <div class="theme-toggle">
+                <i class="fas fa-moon" id="theme-toggle-btn"></i>
+            </div>
+        </header>
+
+        <!-- Search Section -->
+        <section class="search-section">
+            <div class="search-container">
+                <input type="text" id="search-input" placeholder="Search for movies or series...">
+                <select id="search-by">
+                    <option value="title">Title</option>
+                    <option value="release_year">Release Year</option>
+                    <option value="genre">Genre</option>
+                    <option value="rating">Rating</option>
+                </select>
+                <select id="filter-type">
+                    <option value="all">All</option>
+                    <option value="movie">Movies</option>
+                    <option value="series">Series</option>
+                </select>
+                <button id="search-btn" class="btn primary-btn">
+                    <i class="fas fa-search"></i> Search
+                </button>
+            </div>
+        </section>
+
+        <!-- Results Section -->
+        <section class="results-section">
+            <div class="results-header">
+                <h2>Results</h2>
+                <div class="results-actions">
+                    <button id="edit-btn" class="btn secondary-btn">
+                        <i class="fas fa-edit"></i> Edit
+                    </button>
+                    <button id="delete-btn" class="btn danger-btn">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
+                </div>
+            </div>
+            <div class="table-container">
+                <table id="results-table">
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" id="select-all"></th>
+                            <th>Order</th>
+                            <th>Title</th>
+                            <th>Genre</th>
+                            <th>Year</th>
+                            <th>Rating</th>
+                            <th>Type</th>
+                        </tr>
+                    </thead>
+                    <tbody id="results-body"></tbody>
+                </table>
+            </div>
+            <div id="status-label">No results found</div>
+        </section>
+
+        <!-- Add Media Section -->
+        <section class="add-section">
+            <h2>Add New Media</h2>
+            <div class="add-container">
+                <div class="form-container">
+                    <form id="add-form">
+                        <div class="form-group">
+                            <label for="title">Title:</label>
+                            <input type="text" id="title" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="genre">Genre:</label>
+                            <input type="text" id="genre" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="release-year">Release Year:</label>
+                            <input type="number" id="release-year" required>
+                        </div>
+                        <div class="form-group" id="end-year-group">
+                            <label for="end-year">End Year:</label>
+                            <input type="number" id="end-year">
+                        </div>
+                        <div class="form-group">
+                            <label for="rating">Rating:</label>
+                            <input type="number" id="rating" step="0.1" min="0" max="10" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="media-type">Type:</label>
+                            <select id="media-type">
+                                <option value="movie">Movie</option>
+                                <option value="series">Series</option>
+                            </select>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" id="auto-fill-btn" class="btn secondary-btn">
+                                <i class="fas fa-magic"></i> Auto-Fill Info
+                            </button>
+                            <button type="button" id="clear-form-btn" class="btn warning-btn">
+                                <i class="fas fa-eraser"></i> Clear Form
+                            </button>
+                            <button type="submit" class="btn primary-btn">
+                                <i class="fas fa-plus"></i> Add Media
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                <div class="poster-container">
+                    <div id="poster-placeholder">
+                        <i class="fas fa-image"></i>
+                        <p>Poster will appear here</p>
+                    </div>
+                    <img id="poster-image" src="/placeholder.svg" alt="Media Poster" style="display: none;">
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="edit-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Media</h2>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="edit-form">
+                    <input type="hidden" id="edit-id">
+                    <input type="hidden" id="edit-order">
+                    <div class="form-group">
+                        <label for="edit-title">Title:</label>
+                        <input type="text" id="edit-title" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-genre">Genre:</label>
+                        <input type="text" id="edit-genre" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-release-year">Release Year:</label>
+                        <input type="number" id="edit-release-year" required>
+                    </div>
+                    <div class="form-group" id="edit-end-year-group">
+                        <label for="edit-end-year">End Year:</label>
+                        <input type="number" id="edit-end-year">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-rating">Rating:</label>
+                        <input type="number" id="edit-rating" step="0.1" min="0" max="10" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-media-type">Type:</label>
+                        <input type="text" id="edit-media-type" readonly>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" id="edit-auto-fill-btn" class="btn secondary-btn">
+                            <i class="fas fa-magic"></i> Auto-Fill Info
+                        </button>
+                        <button type="submit" class="btn primary-btn">
+                            <i class="fas fa-save"></i> Save Changes
+                        </button>
+                    </div>
+                </form>
+                <div class="edit-poster-container">
+                    <div id="edit-poster-placeholder">
+                        <i class="fas fa-image"></i>
+                        <p>Poster will appear here</p>
+                    </div>
+                    <img id="edit-poster-image" src="/placeholder.svg" alt="Media Poster" style="display: none;">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast">
+        <div class="toast-content">
+            <i id="toast-icon" class="fas"></i>
+            <div class="toast-message" id="toast-message"></div>
+        </div>
+        <div class="toast-progress"></div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loading-spinner" class="spinner-container">
+        <div class="spinner"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
