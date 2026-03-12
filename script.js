@@ -148,7 +148,8 @@ const TMDB_API_KEY = "001a45ee2ffa1d6f2f16fc4c16ae276a"
 const OMDB_API_KEY = "5812b153"
 const TMDB_BASE_URL = "https://api.themoviedb.org/3"
 const TMDB_IMAGE_URL = "https://image.tmdb.org/t/p/w500"
-const API_BASE_URL = "https://media-manager-backend-ai69.onrender.com/api/media";
+const API_BASE_URL = "https://media-manager-backend-wfeb.onrender.com/api/media";
+
 
 // DOM Elements
 const searchInput = document.getElementById("search-input")
