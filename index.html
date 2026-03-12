@@ -1,231 +1,345 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Movie & Series Manager</title>
-    <link rel="stylesheet" href="style.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
-    <style>
-        .table-container {
-            max-height: 400px;
-            overflow-y: auto;
-            border-radius: 4px;
-            margin-bottom: 20px;
-        }
-
-        #results-table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        #results-table thead {
-            position: sticky;
-            top: 0;
-            z-index: 10;
-            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.1);
-        }
-
-        .dark-theme #results-table thead {
-            background-color: #333;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cinéma — Media Vault</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;0,700;1,400&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="style.css">
 </head>
-
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header>
-            <div class="logo">
-                <i class="fas fa-film"></i>
-                <h1>Movie & Series Manager</h1>
-            </div>
-            <div class="theme-toggle">
-                <i class="fas fa-moon" id="theme-toggle-btn"></i>
-            </div>
-        </header>
 
-        <!-- Search Section -->
-        <section class="search-section">
-            <div class="search-container">
-                <input type="text" id="search-input" placeholder="Search for movies or series...">
-                <select id="search-by">
-                    <option value="title">Title</option>
-                    <option value="release_year">Release Year</option>
-                    <option value="genre">Genre</option>
-                    <option value="rating">Rating</option>
-                </select>
-                <select id="filter-type">
-                    <option value="all">All</option>
-                    <option value="movie">Movies</option>
-                    <option value="series">Series</option>
-                </select>
-                <button id="search-btn" class="btn primary-btn">
-                    <i class="fas fa-search"></i> Search
-                </button>
-            </div>
-        </section>
+  <!-- Ambient orbs -->
+  <div class="ambient">
+    <div class="orb o1"></div>
+    <div class="orb o2"></div>
+    <div class="orb o3"></div>
+  </div>
 
-        <!-- Results Section -->
-        <section class="results-section">
-            <div class="results-header">
-                <h2>Results</h2>
-                <div class="results-actions">
-                    <button id="edit-btn" class="btn secondary-btn">
-                        <i class="fas fa-edit"></i> Edit
-                    </button>
-                    <button id="delete-btn" class="btn danger-btn">
-                        <i class="fas fa-trash"></i> Delete
-                    </button>
-                </div>
-            </div>
-            <div class="table-container">
-                <table id="results-table">
-                    <thead>
-                        <tr>
-                            <th><input type="checkbox" id="select-all"></th>
-                            <th>Order</th>
-                            <th>Title</th>
-                            <th>Genre</th>
-                            <th>Year</th>
-                            <th>Rating</th>
-                            <th>Type</th>
-                        </tr>
-                    </thead>
-                    <tbody id="results-body"></tbody>
-                </table>
-            </div>
-            <div id="status-label">No results found</div>
-        </section>
+  <!-- Film grain overlay -->
+  <div class="grain"></div>
 
-        <!-- Add Media Section -->
-        <section class="add-section">
-            <h2>Add New Media</h2>
-            <div class="add-container">
-                <div class="form-container">
-                    <form id="add-form">
-                        <div class="form-group">
-                            <label for="title">Title:</label>
-                            <input type="text" id="title" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="genre">Genre:</label>
-                            <input type="text" id="genre" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="release-year">Release Year:</label>
-                            <input type="number" id="release-year" required>
-                        </div>
-                        <div class="form-group" id="end-year-group">
-                            <label for="end-year">End Year:</label>
-                            <input type="number" id="end-year">
-                        </div>
-                        <div class="form-group">
-                            <label for="rating">Rating:</label>
-                            <input type="number" id="rating" step="0.1" min="0" max="10" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="media-type">Type:</label>
-                            <select id="media-type">
-                                <option value="movie">Movie</option>
-                                <option value="series">Series</option>
-                            </select>
-                        </div>
-                        <div class="form-actions">
-                            <button type="button" id="auto-fill-btn" class="btn secondary-btn">
-                                <i class="fas fa-magic"></i> Auto-Fill Info
-                            </button>
-                            <button type="button" id="clear-form-btn" class="btn warning-btn">
-                                <i class="fas fa-eraser"></i> Clear Form
-                            </button>
-                            <button type="submit" class="btn primary-btn">
-                                <i class="fas fa-plus"></i> Add Media
-                            </button>
-                        </div>
-                    </form>
-                </div>
-                <div class="poster-container">
-                    <div id="poster-placeholder">
-                        <i class="fas fa-image"></i>
-                        <p>Poster will appear here</p>
-                    </div>
-                    <img id="poster-image" src="/placeholder.svg" alt="Media Poster" style="display: none;">
-                </div>
-            </div>
-        </section>
-    </div>
+  <div class="app">
 
-    <!-- Edit Modal -->
-    <div id="edit-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Edit Media</h2>
-                <span class="close">&times;</span>
-            </div>
-            <div class="modal-body">
-                <form id="edit-form">
-                    <input type="hidden" id="edit-id">
-                    <input type="hidden" id="edit-order">
-                    <div class="form-group">
-                        <label for="edit-title">Title:</label>
-                        <input type="text" id="edit-title" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="edit-genre">Genre:</label>
-                        <input type="text" id="edit-genre" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="edit-release-year">Release Year:</label>
-                        <input type="number" id="edit-release-year" required>
-                    </div>
-                    <div class="form-group" id="edit-end-year-group">
-                        <label for="edit-end-year">End Year:</label>
-                        <input type="number" id="edit-end-year">
-                    </div>
-                    <div class="form-group">
-                        <label for="edit-rating">Rating:</label>
-                        <input type="number" id="edit-rating" step="0.1" min="0" max="10" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="edit-media-type">Type:</label>
-                        <input type="text" id="edit-media-type" readonly>
-                    </div>
-                    <div class="form-actions">
-                        <button type="button" id="edit-auto-fill-btn" class="btn secondary-btn">
-                            <i class="fas fa-magic"></i> Auto-Fill Info
-                        </button>
-                        <button type="submit" class="btn primary-btn">
-                            <i class="fas fa-save"></i> Save Changes
-                        </button>
-                    </div>
-                </form>
-                <div class="edit-poster-container">
-                    <div id="edit-poster-placeholder">
-                        <i class="fas fa-image"></i>
-                        <p>Poster will appear here</p>
-                    </div>
-                    <img id="edit-poster-image" src="/placeholder.svg" alt="Media Poster" style="display: none;">
-                </div>
-            </div>
+    <!-- ═══════════ HEADER ═══════════ -->
+    <header class="hdr">
+      <div class="hdr-brand">
+        <div class="brand-reel"><i class="fas fa-film"></i></div>
+        <div>
+          <div class="brand-name">Cinéma</div>
+          <div class="brand-sub">Media Vault</div>
         </div>
-    </div>
+      </div>
 
-    <!-- Toast Notification -->
-    <div id="toast" class="toast">
-        <div class="toast-content">
-            <i id="toast-icon" class="fas"></i>
-            <div class="toast-message" id="toast-message"></div>
+      <nav class="hdr-nav">
+        <button class="nav-pill active" id="nav-collection" onclick="switchView('collection')">
+          <i class="fas fa-layer-group"></i><span>Collection</span>
+        </button>
+        <button class="nav-pill" id="nav-add" onclick="switchView('add')">
+          <i class="fas fa-plus"></i><span>Add New</span>
+        </button>
+      </nav>
+
+      <button class="icon-btn" id="theme-toggle-btn" title="Toggle Theme">
+        <i class="fas fa-moon"></i>
+      </button>
+    </header>
+
+    <!-- ═══════════ COLLECTION VIEW ═══════════ -->
+    <section class="view" id="view-collection">
+
+      <!-- Stats ribbon -->
+      <div class="stats-ribbon">
+        <div class="stat-block">
+          <span class="stat-n" id="stat-movies">0</span>
+          <span class="stat-l">Movies</span>
         </div>
-        <div class="toast-progress"></div>
-    </div>
+        <div class="stat-sep"></div>
+        <div class="stat-block">
+          <span class="stat-n" id="stat-series">0</span>
+          <span class="stat-l">Series</span>
+        </div>
+        <div class="stat-sep"></div>
+        <div class="stat-block">
+          <span class="stat-n" id="stat-avg">—</span>
+          <span class="stat-l">Avg Rating</span>
+        </div>
+        <div class="stat-sep"></div>
+        <div class="stat-block stat-top-block">
+          <span class="stat-n stat-top-title" id="stat-top">—</span>
+          <span class="stat-l">Top Rated</span>
+        </div>
+      </div>
 
-    <!-- Loading Spinner -->
-    <div id="loading-spinner" class="spinner-container">
-        <div class="spinner"></div>
-    </div>
+      <!-- Search -->
+      <div class="search-wrap">
+        <div class="search-box">
+          <i class="fas fa-search search-ico"></i>
+          <input type="text" id="search-input" class="search-inp" placeholder="Search your vault…">
+          <select id="search-by" class="sel-chip">
+            <option value="title">Title</option>
+            <option value="release_year">Year</option>
+            <option value="genre">Genre</option>
+            <option value="rating">Rating</option>
+          </select>
+          <select id="filter-type" class="sel-chip">
+            <option value="all">All</option>
+            <option value="movie">Movies</option>
+            <option value="series">Series</option>
+          </select>
+          <button id="search-btn" class="search-go">
+            <i class="fas fa-arrow-right"></i>
+          </button>
+        </div>
+      </div>
 
-    <script src="script.js"></script>
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <div class="view-switcher">
+          <button class="vs-btn active" id="grid-toggle-btn" onclick="toggleGridView('grid')" title="Grid view">
+            <i class="fas fa-th-large"></i>
+          </button>
+          <button class="vs-btn" id="list-toggle-btn" onclick="toggleGridView('list')" title="List view">
+            <i class="fas fa-list"></i>
+          </button>
+        </div>
+        <div id="status-label" class="status-txt">Loading…</div>
+        <div class="tbl-actions">
+          <button id="edit-btn" class="act-btn">
+            <i class="fas fa-pen"></i> Edit
+          </button>
+          <button id="delete-btn" class="act-btn danger">
+            <i class="fas fa-trash"></i> Delete
+          </button>
+        </div>
+      </div>
+
+      <!-- Card Grid -->
+      <div id="card-grid" class="card-grid"></div>
+
+      <!-- Table View -->
+      <div id="table-view" class="tbl-wrap" style="display:none;">
+        <table id="results-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" id="select-all" class="chk"></th>
+              <th>#</th>
+              <th>Title</th>
+              <th>Genre</th>
+              <th>Year</th>
+              <th>Rating</th>
+              <th>Type</th>
+            </tr>
+          </thead>
+          <tbody id="results-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Empty state -->
+      <div id="empty-state" class="empty-state" style="display:none;">
+        <div class="empty-reel"><i class="fas fa-film"></i></div>
+        <h3>Your vault is empty</h3>
+        <p>Add your first movie or series to get started.</p>
+        <button class="gold-btn" onclick="switchView('add')">
+          <i class="fas fa-plus"></i> Add Something
+        </button>
+      </div>
+
+    </section>
+
+    <!-- ═══════════ ADD VIEW ═══════════ -->
+    <section class="view" id="view-add" style="display:none;">
+      <div class="add-wrap">
+
+        <div class="add-form-panel">
+          <div class="panel-hdr">
+            <h2 class="panel-title">Add to Collection</h2>
+            <p class="panel-sub">Fill in the details or use Auto-Fill magic</p>
+          </div>
+
+          <form id="add-form" class="a-form">
+            <div class="frow">
+              <div class="fgrp">
+                <label for="title">Title</label>
+                <input type="text" id="title" placeholder="e.g. Oppenheimer" required>
+              </div>
+              <div class="fgrp fgrp-sm">
+                <label for="media-type">Type</label>
+                <select id="media-type" class="f-select">
+                  <option value="movie">🎬 Movie</option>
+                  <option value="series">📺 Series</option>
+                </select>
+              </div>
+            </div>
+            <div class="frow">
+              <div class="fgrp">
+                <label for="genre">Genre</label>
+                <input type="text" id="genre" placeholder="Drama, Thriller…" required>
+              </div>
+              <div class="fgrp fgrp-sm">
+                <label for="rating">Rating</label>
+                <input type="number" id="rating" step="0.1" min="0" max="10" placeholder="8.5" required>
+              </div>
+            </div>
+            <div class="frow">
+              <div class="fgrp">
+                <label for="release-year">Release Year</label>
+                <input type="number" id="release-year" placeholder="2024" required>
+              </div>
+              <div class="fgrp" id="end-year-group" style="display:none;">
+                <label for="end-year">End Year</label>
+                <input type="number" id="end-year" placeholder="2026">
+              </div>
+            </div>
+            <div class="form-footer-row">
+              <button type="button" id="auto-fill-btn" class="btn-magic">
+                <i class="fas fa-magic"></i> Auto-Fill
+              </button>
+              <button type="button" id="clear-form-btn" class="btn-ghost">
+                <i class="fas fa-eraser"></i> Clear
+              </button>
+              <button type="submit" class="btn-gold">
+                <i class="fas fa-plus"></i> Add to Vault
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="add-poster-panel">
+          <div id="poster-placeholder" class="poster-ph">
+            <div class="poster-ph-inner">
+              <i class="fas fa-photo-film"></i>
+              <p>Poster Preview</p>
+              <span>Auto-Fill will load the poster</span>
+            </div>
+          </div>
+          <img id="poster-image" src="" alt="Poster" class="poster-img" style="display:none;">
+        </div>
+
+      </div>
+    </section>
+
+  </div><!-- /app -->
+
+
+  <!-- ═══════════ DETAIL MODAL ═══════════ -->
+  <div id="detail-modal" class="det-overlay">
+    <div class="det-box">
+      <button class="det-close" id="det-close-btn"><i class="fas fa-times"></i></button>
+
+      <div class="det-bg-blur" id="detail-bg-blur"></div>
+
+      <div class="det-content">
+        <div class="det-poster-col">
+          <div id="detail-poster-ph" class="det-poster-ph"><i class="fas fa-film"></i></div>
+          <img id="detail-poster" src="" alt="" class="det-poster-img" style="display:none;">
+        </div>
+
+        <div class="det-info-col">
+          <div class="det-type-badge" id="detail-type"></div>
+          <h1 class="det-title" id="detail-title"></h1>
+          <div class="det-meta" id="detail-meta"></div>
+
+          <div class="det-rating-row" id="detail-rating-display"></div>
+
+          <div class="det-genres" id="detail-genre-tags"></div>
+
+          <div class="det-cta">
+            <button class="btn-gold" id="detail-edit-btn">
+              <i class="fas fa-pen"></i> Edit Title
+            </button>
+            <button class="btn-ghost det-close-cta">
+              <i class="fas fa-times"></i> Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════ EDIT MODAL ═══════════ -->
+  <div id="edit-modal" class="edit-overlay">
+    <div class="edit-box">
+      <div class="edit-hdr">
+        <h2>Edit Title</h2>
+        <button class="close edit-x"><i class="fas fa-times"></i></button>
+      </div>
+      <div class="edit-body">
+        <form id="edit-form" class="a-form">
+          <input type="hidden" id="edit-id">
+          <input type="hidden" id="edit-order">
+          <div class="frow">
+            <div class="fgrp">
+              <label for="edit-title">Title</label>
+              <input type="text" id="edit-title" required>
+            </div>
+            <div class="fgrp">
+              <label for="edit-genre">Genre</label>
+              <input type="text" id="edit-genre" required>
+            </div>
+          </div>
+          <div class="frow">
+            <div class="fgrp">
+              <label for="edit-release-year">Release Year</label>
+              <input type="number" id="edit-release-year" required>
+            </div>
+            <div class="fgrp" id="edit-end-year-group">
+              <label for="edit-end-year">End Year</label>
+              <input type="number" id="edit-end-year">
+            </div>
+          </div>
+          <div class="frow">
+            <div class="fgrp">
+              <label for="edit-rating">Rating</label>
+              <input type="number" id="edit-rating" step="0.1" min="0" max="10" required>
+            </div>
+            <div class="fgrp">
+              <label for="edit-media-type">Type</label>
+              <input type="text" id="edit-media-type" readonly class="readonly-inp">
+            </div>
+          </div>
+          <div class="form-footer-row">
+            <button type="button" id="edit-auto-fill-btn" class="btn-magic">
+              <i class="fas fa-magic"></i> Auto-Fill
+            </button>
+            <button type="submit" class="btn-gold">
+              <i class="fas fa-save"></i> Save Changes
+            </button>
+          </div>
+        </form>
+
+        <div class="edit-poster-col">
+          <div id="edit-poster-placeholder" class="poster-ph">
+            <div class="poster-ph-inner">
+              <i class="fas fa-photo-film"></i>
+              <p>Poster Preview</p>
+            </div>
+          </div>
+          <img id="edit-poster-image" src="" alt="Poster" class="poster-img" style="display:none;">
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Toast -->
+  <div id="toast" class="toast">
+    <div class="toast-content">
+      <i id="toast-icon" class="fas"></i>
+      <span id="toast-message"></span>
+    </div>
+    <div class="toast-progress"></div>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading-spinner" class="loading-overlay">
+    <div class="loading-ring"><div></div><div></div><div></div><div></div></div>
+  </div>
+
+  <script src="script.js"></script>
 </body>
 </html>
