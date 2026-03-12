@@ -1,9 +1,5 @@
 document.addEventListener("DOMContentLoaded", () => {
-  const searchInputOriginal = document.getElementById("searchInput")
-  const searchButtonOriginal = document.getElementById("searchButton")
-  const resultsContainerOriginal = document.getElementById("results")
-  const mediaTypeSelectOriginal = document.getElementById("mediaType")
-  const searchBySelectOriginal = document.getElementById("searchBy")
+
 
   const moviesOriginal = [
     { title: "The Shawshank Redemption", genre: "Drama", rating: "9.3" },
