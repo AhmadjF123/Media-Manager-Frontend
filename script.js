@@ -23,50 +23,17 @@ const API_BASE_URL =
 const CACHE_KEY = "cinema_media_cache";
 const CACHE_EXPIRY = 5 * 60 * 1000; // 5 دقائق
 
-// ── DOM Elements ──
-const searchInput = document.getElementById("search-input");
-const searchBySelect = document.getElementById("search-by");
-const filterTypeSelect = document.getElementById("filter-type");
-const searchBtn = document.getElementById("search-btn");
-const resultsTable = document.getElementById("results-table");
-const resultsBody = document.getElementById("results-body");
-const statusLabel = document.getElementById("status-label");
-const selectAllCheckbox = document.getElementById("select-all");
-const editBtn = document.getElementById("edit-btn");
-const deleteBtn = document.getElementById("delete-btn");
-const addForm = document.getElementById("add-form");
-const titleInput = document.getElementById("title");
-const genreInput = document.getElementById("genre");
-const releaseYearInput = document.getElementById("release-year");
-const endYearInput = document.getElementById("end-year");
-const endYearGroup = document.getElementById("end-year-group");
-const ratingInput = document.getElementById("rating");
-const mediaTypeSelect = document.getElementById("media-type");
-const autoFillBtn = document.getElementById("auto-fill-btn");
-const posterImage = document.getElementById("poster-image");
-const posterPlaceholder = document.getElementById("poster-placeholder");
-const editModal = document.getElementById("edit-modal");
-const closeModalBtn = document.querySelector(".close");
-const editForm = document.getElementById("edit-form");
-const editIdInput = document.getElementById("edit-id");
-const editOrderInput = document.getElementById("edit-order");
-const editTitleInput = document.getElementById("edit-title");
-const editGenreInput = document.getElementById("edit-genre");
-const editReleaseYearInput = document.getElementById("edit-release-year");
-const editEndYearInput = document.getElementById("edit-end-year");
-const editEndYearGroup = document.getElementById("edit-end-year-group");
-const editRatingInput = document.getElementById("edit-rating");
-const editMediaTypeInput = document.getElementById("edit-media-type");
-const editAutoFillBtn = document.getElementById("edit-auto-fill-btn");
-const editPosterImage = document.getElementById("edit-poster-image");
-const editPosterPlaceholder = document.getElementById(
-  "edit-poster-placeholder",
-);
-const toast = document.getElementById("toast");
-const toastMessage = document.getElementById("toast-message");
-const toastIcon = document.getElementById("toast-icon");
-const loadingSpinner = document.getElementById("loading-spinner");
-const themeToggleBtn = document.getElementById("theme-toggle-btn");
+// ── DOM Elements (declared globally, initialized in init) ──
+let searchInput, searchBySelect, filterTypeSelect, searchBtn;
+let resultsTable, resultsBody, statusLabel, selectAllCheckbox;
+let editBtn, deleteBtn, addForm, titleInput, genreInput;
+let releaseYearInput, endYearInput, endYearGroup, ratingInput;
+let mediaTypeSelect, autoFillBtn, posterImage, posterPlaceholder;
+let editModal, closeModalBtn, editForm, editIdInput, editOrderInput;
+let editTitleInput, editGenreInput, editReleaseYearInput, editEndYearInput;
+let editEndYearGroup, editRatingInput, editMediaTypeInput, editAutoFillBtn;
+let editPosterImage, editPosterPlaceholder;
+let toast, toastMessage, toastIcon, loadingSpinner, themeToggleBtn;
 
 // ── Global state ──
 let currentResults = []; // كل الوسائط (آخر تحميل)
@@ -95,22 +62,26 @@ async function fetchAllMedia(forceRefresh = false) {
         if (Date.now() - timestamp < CACHE_EXPIRY) {
           return data;
         }
-      } catch (e) {
-        /* تجاهل الأخطاء */
-      }
+      } catch (e) {}
     }
   }
 
   showLoading();
   try {
-    const response = await fetch(`${API_BASE_URL}/all`);
-    if (!response.ok) throw new Error("فشل الاتصال");
-    const data = await response.json();
+    // جلب الأفلام والمسلسلات بشكل منفصل
+    const [movies, series] = await Promise.all([
+      fetchMedia("movie"),
+      fetchMedia("series")
+    ]);
+
+    const allMedia = [...movies, ...series];
+
+    // تخزين النتائج في الكاش
     localStorage.setItem(
       CACHE_KEY,
-      JSON.stringify({ data, timestamp: Date.now() }),
+      JSON.stringify({ data: allMedia, timestamp: Date.now() })
     );
-    return data;
+    return allMedia;
   } catch (error) {
     showToast("خطأ في جلب البيانات", "error");
     return [];
@@ -196,10 +167,11 @@ async function deleteMedia(mediaType, orderNumber) {
 function filterLocalResults() {
   const query = searchInput.value.trim().toLowerCase();
   const by = searchBySelect.value;
-  const type = filterTypeSelect.value;
+  const type = filterTypeSelect.value;  // هذه القيمة من واجهة المستخدم
 
   let filtered = currentResults.filter((item) => {
-    if (type !== "all" && item.media_type !== type) return false;
+    // استخدم item.type بدلاً من item.media_type
+    if (type !== "all" && item.type !== type) return false;
     if (!query) return true;
 
     const val = item[by];
@@ -222,7 +194,7 @@ function filterLocalResults() {
   filtered = filtered.map((item) => ({
     ...item,
     display_year:
-      item.media_type === "series" && item.end_year
+      item.type === "series" && item.end_year
         ? item.release_year === item.end_year
           ? item.release_year
           : `${item.release_year}–${item.end_year}`
@@ -1100,6 +1072,49 @@ function escapeHtml(str) {
 //  التهيئة
 // ════════════════════════════════════════════════════════
 async function init() {
+  // ── تهيئة عناصر DOM ──
+  searchInput = document.getElementById("search-input");
+  searchBySelect = document.getElementById("search-by");
+  filterTypeSelect = document.getElementById("filter-type");
+  searchBtn = document.getElementById("search-btn");
+  resultsTable = document.getElementById("results-table");
+  resultsBody = document.getElementById("results-body");
+  statusLabel = document.getElementById("status-label");
+  selectAllCheckbox = document.getElementById("select-all");
+  editBtn = document.getElementById("edit-btn");
+  deleteBtn = document.getElementById("delete-btn");
+  addForm = document.getElementById("add-form");
+  titleInput = document.getElementById("title");
+  genreInput = document.getElementById("genre");
+  releaseYearInput = document.getElementById("release-year");
+  endYearInput = document.getElementById("end-year");
+  endYearGroup = document.getElementById("end-year-group");
+  ratingInput = document.getElementById("rating");
+  mediaTypeSelect = document.getElementById("media-type");
+  autoFillBtn = document.getElementById("auto-fill-btn");
+  posterImage = document.getElementById("poster-image");
+  posterPlaceholder = document.getElementById("poster-placeholder");
+  editModal = document.getElementById("edit-modal");
+  closeModalBtn = document.querySelector(".edit-x");
+  editForm = document.getElementById("edit-form");
+  editIdInput = document.getElementById("edit-id");
+  editOrderInput = document.getElementById("edit-order");
+  editTitleInput = document.getElementById("edit-title");
+  editGenreInput = document.getElementById("edit-genre");
+  editReleaseYearInput = document.getElementById("edit-release-year");
+  editEndYearInput = document.getElementById("edit-end-year");
+  editEndYearGroup = document.getElementById("edit-end-year-group");
+  editRatingInput = document.getElementById("edit-rating");
+  editMediaTypeInput = document.getElementById("edit-media-type");
+  editAutoFillBtn = document.getElementById("edit-auto-fill-btn");
+  editPosterImage = document.getElementById("edit-poster-image");
+  editPosterPlaceholder = document.getElementById("edit-poster-placeholder");
+  toast = document.getElementById("toast");
+  toastMessage = document.getElementById("toast-message");
+  toastIcon = document.getElementById("toast-icon");
+  loadingSpinner = document.getElementById("loading-spinner");
+  themeToggleBtn = document.getElementById("theme-toggle-btn");
+
   // الثيم
   if (localStorage.getItem("darkMode") === "false") {
     document.body.classList.add("light-theme");
