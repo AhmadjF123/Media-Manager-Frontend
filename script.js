@@ -5,73 +5,79 @@
 
 window.addEventListener("error", (event) => {
   console.error("Uncaught error:", event.error);
-  showToast("خطأ: " + (event.error ? event.error.message : "غير معروف"), "error");
+  showToast(
+    "خطأ: " + (event.error ? event.error.message : "غير معروف"),
+    "error",
+  );
 });
 
 // ── API Configuration ──
-const TMDB_API_KEY    = "001a45ee2ffa1d6f2f16fc4c16ae276a";
-const OMDB_API_KEY    = "5812b153";
-const TMDB_BASE_URL   = "https://api.themoviedb.org/3";
-const TMDB_IMAGE_URL  = "https://image.tmdb.org/t/p/w500";
-const API_BASE_URL    = "https://media-manager-backend-wfeb.onrender.com/api/media" || "http://localhost:3000/api/media";
+const TMDB_API_KEY = "001a45ee2ffa1d6f2f16fc4c16ae276a";
+const OMDB_API_KEY = "5812b153";
+const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+const TMDB_IMAGE_URL = "https://image.tmdb.org/t/p/w500";
+const API_BASE_URL =
+  "https://media-manager-backend-wfeb.onrender.com/api/media";
 
 // ── Caching ──
-const CACHE_KEY       = "cinema_media_cache";
-const CACHE_EXPIRY    = 5 * 60 * 1000; // 5 دقائق
+const CACHE_KEY = "cinema_media_cache";
+const CACHE_EXPIRY = 5 * 60 * 1000; // 5 دقائق
 
 // ── DOM Elements ──
-const searchInput       = document.getElementById("search-input");
-const searchBySelect    = document.getElementById("search-by");
-const filterTypeSelect  = document.getElementById("filter-type");
-const searchBtn         = document.getElementById("search-btn");
-const resultsTable      = document.getElementById("results-table");
-const resultsBody       = document.getElementById("results-body");
-const statusLabel       = document.getElementById("status-label");
+const searchInput = document.getElementById("search-input");
+const searchBySelect = document.getElementById("search-by");
+const filterTypeSelect = document.getElementById("filter-type");
+const searchBtn = document.getElementById("search-btn");
+const resultsTable = document.getElementById("results-table");
+const resultsBody = document.getElementById("results-body");
+const statusLabel = document.getElementById("status-label");
 const selectAllCheckbox = document.getElementById("select-all");
-const editBtn           = document.getElementById("edit-btn");
-const deleteBtn         = document.getElementById("delete-btn");
-const addForm           = document.getElementById("add-form");
-const titleInput        = document.getElementById("title");
-const genreInput        = document.getElementById("genre");
-const releaseYearInput  = document.getElementById("release-year");
-const endYearInput      = document.getElementById("end-year");
-const endYearGroup      = document.getElementById("end-year-group");
-const ratingInput       = document.getElementById("rating");
-const mediaTypeSelect   = document.getElementById("media-type");
-const autoFillBtn       = document.getElementById("auto-fill-btn");
-const posterImage       = document.getElementById("poster-image");
+const editBtn = document.getElementById("edit-btn");
+const deleteBtn = document.getElementById("delete-btn");
+const addForm = document.getElementById("add-form");
+const titleInput = document.getElementById("title");
+const genreInput = document.getElementById("genre");
+const releaseYearInput = document.getElementById("release-year");
+const endYearInput = document.getElementById("end-year");
+const endYearGroup = document.getElementById("end-year-group");
+const ratingInput = document.getElementById("rating");
+const mediaTypeSelect = document.getElementById("media-type");
+const autoFillBtn = document.getElementById("auto-fill-btn");
+const posterImage = document.getElementById("poster-image");
 const posterPlaceholder = document.getElementById("poster-placeholder");
-const editModal         = document.getElementById("edit-modal");
-const closeModalBtn     = document.querySelector(".close");
-const editForm          = document.getElementById("edit-form");
-const editIdInput       = document.getElementById("edit-id");
-const editOrderInput    = document.getElementById("edit-order");
-const editTitleInput    = document.getElementById("edit-title");
-const editGenreInput    = document.getElementById("edit-genre");
+const editModal = document.getElementById("edit-modal");
+const closeModalBtn = document.querySelector(".close");
+const editForm = document.getElementById("edit-form");
+const editIdInput = document.getElementById("edit-id");
+const editOrderInput = document.getElementById("edit-order");
+const editTitleInput = document.getElementById("edit-title");
+const editGenreInput = document.getElementById("edit-genre");
 const editReleaseYearInput = document.getElementById("edit-release-year");
-const editEndYearInput  = document.getElementById("edit-end-year");
-const editEndYearGroup  = document.getElementById("edit-end-year-group");
-const editRatingInput   = document.getElementById("edit-rating");
+const editEndYearInput = document.getElementById("edit-end-year");
+const editEndYearGroup = document.getElementById("edit-end-year-group");
+const editRatingInput = document.getElementById("edit-rating");
 const editMediaTypeInput = document.getElementById("edit-media-type");
-const editAutoFillBtn   = document.getElementById("edit-auto-fill-btn");
-const editPosterImage   = document.getElementById("edit-poster-image");
-const editPosterPlaceholder = document.getElementById("edit-poster-placeholder");
-const toast             = document.getElementById("toast");
-const toastMessage      = document.getElementById("toast-message");
-const toastIcon         = document.getElementById("toast-icon");
-const loadingSpinner    = document.getElementById("loading-spinner");
-const themeToggleBtn    = document.getElementById("theme-toggle-btn");
+const editAutoFillBtn = document.getElementById("edit-auto-fill-btn");
+const editPosterImage = document.getElementById("edit-poster-image");
+const editPosterPlaceholder = document.getElementById(
+  "edit-poster-placeholder",
+);
+const toast = document.getElementById("toast");
+const toastMessage = document.getElementById("toast-message");
+const toastIcon = document.getElementById("toast-icon");
+const loadingSpinner = document.getElementById("loading-spinner");
+const themeToggleBtn = document.getElementById("theme-toggle-btn");
 
 // ── Global state ──
-let currentResults  = [];           // كل الوسائط (آخر تحميل)
-let currentGridMode = 'grid';        // grid or list
-let searchDebounceTimer = null;      // للبحث المباشر
+let currentResults = []; // كل الوسائط (آخر تحميل)
+let currentGridMode = "grid"; // grid or list
+let searchDebounceTimer = null; // للبحث المباشر
 
 // ════════════════════════════════════════════════════════
 //  دوال المساعدة (Debounce)
 // ════════════════════════════════════════════════════════
 function debounce(func, delay) {
-  return function(...args) {
+  return function (...args) {
     clearTimeout(searchDebounceTimer);
     searchDebounceTimer = setTimeout(() => func.apply(this, args), delay);
   };
@@ -89,7 +95,9 @@ async function fetchAllMedia(forceRefresh = false) {
         if (Date.now() - timestamp < CACHE_EXPIRY) {
           return data;
         }
-      } catch (e) { /* تجاهل الأخطاء */ }
+      } catch (e) {
+        /* تجاهل الأخطاء */
+      }
     }
   }
 
@@ -98,7 +106,10 @@ async function fetchAllMedia(forceRefresh = false) {
     const response = await fetch(`${API_BASE_URL}/all`);
     if (!response.ok) throw new Error("فشل الاتصال");
     const data = await response.json();
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: Date.now() }));
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({ data, timestamp: Date.now() }),
+    );
     return data;
   } catch (error) {
     showToast("خطأ في جلب البيانات", "error");
@@ -116,7 +127,7 @@ async function fetchMedia(mediaType) {
     const response = await fetch(`${API_BASE_URL}?type=${mediaType}`);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
-    return data.map(item => ({
+    return data.map((item) => ({
       ...item,
       order_number: parseInt(item.order_number) || 0,
       release_year: parseInt(item.release_year) || 0,
@@ -149,7 +160,11 @@ async function updateMedia(mediaType, orderNumber, mediaData) {
     const response = await fetch(API_BASE_URL, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: mediaType, order_number: orderNumber, data: mediaData }),
+      body: JSON.stringify({
+        type: mediaType,
+        order_number: orderNumber,
+        data: mediaData,
+      }),
     });
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const result = await response.json();
@@ -183,7 +198,7 @@ function filterLocalResults() {
   const by = searchBySelect.value;
   const type = filterTypeSelect.value;
 
-  let filtered = currentResults.filter(item => {
+  let filtered = currentResults.filter((item) => {
     if (type !== "all" && item.media_type !== type) return false;
     if (!query) return true;
 
@@ -204,7 +219,7 @@ function filterLocalResults() {
   filtered.sort((a, b) => a.order_number - b.order_number);
 
   // إضافة display_year
-  filtered = filtered.map(item => ({
+  filtered = filtered.map((item) => ({
     ...item,
     display_year:
       item.media_type === "series" && item.end_year
@@ -222,7 +237,7 @@ function filterLocalResults() {
 async function searchMedia(forceRefresh = false) {
   try {
     const allMedia = await fetchAllMedia(forceRefresh);
-    currentResults = allMedia.map(item => ({
+    currentResults = allMedia.map((item) => ({
       ...item,
       display_year:
         item.media_type === "series" && item.end_year
@@ -243,8 +258,11 @@ async function searchMedia(forceRefresh = false) {
 function updateResultsTable(results) {
   // تحديث الجدول
   resultsBody.innerHTML = "";
-  results.forEach(item => {
-    const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0;
+  results.forEach((item) => {
+    const rating =
+      typeof item.rating === "number"
+        ? item.rating
+        : parseFloat(item.rating) || 0;
     const row = document.createElement("tr");
     row.innerHTML = `
       <td><input type="checkbox" class="chk" onclick="toggleRowSelection(this)"></td>
@@ -259,9 +277,10 @@ function updateResultsTable(results) {
   });
 
   // تحديث الحالة
-  statusLabel.textContent = results.length > 0
-    ? `${results.length} عنوان${results.length !== 1 ? "ات" : ""} في المجموعة`
-    : "لا توجد نتائج";
+  statusLabel.textContent =
+    results.length > 0
+      ? `${results.length} عنوان${results.length !== 1 ? "ات" : ""} في المجموعة`
+      : "لا توجد نتائج";
 
   // تحديث البطاقات
   updateCardGrid(results);
@@ -280,8 +299,12 @@ function updateCardGrid(results) {
   grid.innerHTML = "";
 
   results.forEach((item, index) => {
-    const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0;
-    const ratingColor = rating >= 8 ? "#4caf50" : rating >= 6 ? "#d4a843" : "#e53935";
+    const rating =
+      typeof item.rating === "number"
+        ? item.rating
+        : parseFloat(item.rating) || 0;
+    const ratingColor =
+      rating >= 8 ? "#4caf50" : rating >= 6 ? "#d4a843" : "#e53935";
     const hasPoster = item.poster_url && item.poster_url.startsWith("http");
 
     const card = document.createElement("div");
@@ -330,7 +353,9 @@ function toggleCardSelection(checkbox, index) {
     if (selectAllCheckbox) selectAllCheckbox.checked = false;
   }
   // مزامنة مع الجدول
-  const tableCheckboxes = document.querySelectorAll("#results-body input[type='checkbox']");
+  const tableCheckboxes = document.querySelectorAll(
+    "#results-body input[type='checkbox']",
+  );
   if (tableCheckboxes[index]) {
     tableCheckboxes[index].checked = checkbox.checked;
     toggleRowSelection(tableCheckboxes[index]);
@@ -354,12 +379,17 @@ function toggleSelectAll() {
   checkboxes.forEach((cb) => {
     cb.checked = selectAllCheckbox.checked;
     const row = cb.closest("tr");
-    row && (selectAllCheckbox.checked ? row.classList.add("selected") : row.classList.remove("selected"));
+    row &&
+      (selectAllCheckbox.checked
+        ? row.classList.add("selected")
+        : row.classList.remove("selected"));
   });
   // مزامنة البطاقات
   const cards = document.querySelectorAll(".media-card");
   cards.forEach((card) => {
-    selectAllCheckbox.checked ? card.classList.add("selected") : card.classList.remove("selected");
+    selectAllCheckbox.checked
+      ? card.classList.add("selected")
+      : card.classList.remove("selected");
     const chk = card.querySelector(".card-chk");
     if (chk) chk.checked = selectAllCheckbox.checked;
   });
@@ -369,18 +399,26 @@ function toggleSelectAll() {
 //  الإحصائيات
 // ════════════════════════════════════════════════════════
 function updateStats(results) {
-  const movies = results.filter(r => r.media_type === "movie");
-  const series = results.filter(r => r.media_type === "series");
-  const topItem = results.reduce((best, r) => (!best || r.rating > best.rating ? r : best), null);
-  const avg = results.length > 0
-    ? (results.reduce((s, r) => s + (parseFloat(r.rating) || 0), 0) / results.length).toFixed(1)
-    : "—";
+  const movies = results.filter((r) => r.media_type === "movie");
+  const series = results.filter((r) => r.media_type === "series");
+  const topItem = results.reduce(
+    (best, r) => (!best || r.rating > best.rating ? r : best),
+    null,
+  );
+  const avg =
+    results.length > 0
+      ? (
+          results.reduce((s, r) => s + (parseFloat(r.rating) || 0), 0) /
+          results.length
+        ).toFixed(1)
+      : "—";
 
   const el = (id) => document.getElementById(id);
   if (el("stat-movies")) el("stat-movies").textContent = movies.length;
   if (el("stat-series")) el("stat-series").textContent = series.length;
   if (el("stat-avg")) el("stat-avg").textContent = avg;
-  if (el("stat-top")) el("stat-top").textContent = topItem ? topItem.title : "—";
+  if (el("stat-top"))
+    el("stat-top").textContent = topItem ? topItem.title : "—";
 }
 
 // ════════════════════════════════════════════════════════
@@ -390,7 +428,10 @@ function showDetailModal(item) {
   const overlay = document.getElementById("detail-modal");
   if (!overlay) return;
 
-  const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0;
+  const rating =
+    typeof item.rating === "number"
+      ? item.rating
+      : parseFloat(item.rating) || 0;
 
   const poster = document.getElementById("detail-poster");
   const posterPh = document.getElementById("detail-poster-ph");
@@ -428,9 +469,9 @@ function showDetailModal(item) {
     <div class="rating-number">${rating.toFixed(1)}<span>/10</span></div>
   `;
 
-  const genres = item.genre.split(",").map(g => g.trim());
+  const genres = item.genre.split(",").map((g) => g.trim());
   document.getElementById("detail-genre-tags").innerHTML = genres
-    .map(g => `<span class="genre-tag">${escapeHtml(g)}</span>`)
+    .map((g) => `<span class="genre-tag">${escapeHtml(g)}</span>`)
     .join("");
 
   document.getElementById("detail-edit-btn").onclick = () => {
@@ -513,11 +554,16 @@ async function addMedia(e) {
       genre,
       release_year: releaseYear,
       rating,
-      poster_url: posterImage.src && posterImage.src.startsWith("http") ? posterImage.src : null,
+      poster_url:
+        posterImage.src && posterImage.src.startsWith("http")
+          ? posterImage.src
+          : null,
     };
 
     if (mediaType === "series") {
-      const endYear = endYearInput.value.trim() ? parseInt(endYearInput.value) : releaseYear;
+      const endYear = endYearInput.value.trim()
+        ? parseInt(endYearInput.value)
+        : releaseYear;
       if (endYear < releaseYear) {
         showToast("سنة النهاية يجب أن تكون ≥ سنة البداية", "error");
         return;
@@ -526,9 +572,11 @@ async function addMedia(e) {
     }
 
     // التحقق من التكرار (محلياً)
-    const existing = currentResults.filter(item => item.media_type === mediaType);
+    const existing = currentResults.filter(
+      (item) => item.media_type === mediaType,
+    );
     const isDuplicate = existing.some(
-      item => item.title && item.title.toLowerCase() === title.toLowerCase()
+      (item) => item.title && item.title.toLowerCase() === title.toLowerCase(),
     );
     if (isDuplicate) {
       showToast(`"${title}" موجود بالفعل! 🎬`, "error");
@@ -565,7 +613,9 @@ function clearForm() {
 // ════════════════════════════════════════════════════════
 async function editSelected() {
   try {
-    const checkboxes = document.querySelectorAll('tbody input[type="checkbox"]:checked');
+    const checkboxes = document.querySelectorAll(
+      'tbody input[type="checkbox"]:checked',
+    );
     if (checkboxes.length !== 1) {
       showToast("الرجاء تحديد عنصر واحد فقط للتعديل", "info");
       return;
@@ -584,7 +634,8 @@ async function editSelected() {
 
     // البحث في currentResults بدلاً من fetch
     let mediaItem = currentResults.find(
-      item => item.order_number === orderNumber && item.media_type === mediaType
+      (item) =>
+        item.order_number === orderNumber && item.media_type === mediaType,
     );
 
     if (!mediaItem) {
@@ -601,7 +652,8 @@ async function editSelected() {
 
     if (mediaType === "series") {
       editEndYearGroup.style.display = "flex";
-      editEndYearInput.value = mediaItem.end_year || mediaItem.release_year || "";
+      editEndYearInput.value =
+        mediaItem.end_year || mediaItem.release_year || "";
     } else {
       editEndYearGroup.style.display = "none";
     }
@@ -647,7 +699,8 @@ async function saveChanges(e) {
       return;
     }
 
-    const releaseYear = parseInt(editReleaseYearInput.value) || new Date().getFullYear();
+    const releaseYear =
+      parseInt(editReleaseYearInput.value) || new Date().getFullYear();
     const rating = parseFloat(editRatingInput.value) || 0;
 
     if (rating < 0 || rating > 10) {
@@ -660,7 +713,8 @@ async function saveChanges(e) {
       genre,
       release_year: releaseYear,
       rating,
-      poster_url: editPosterImage.style.display === "block" ? editPosterImage.src : null,
+      poster_url:
+        editPosterImage.style.display === "block" ? editPosterImage.src : null,
     };
 
     if (mediaType === "series") {
@@ -697,7 +751,10 @@ async function fetchEditInfo() {
   showLoading();
 
   try {
-    const info = mediaType === "movie" ? await searchMovieInfo(title) : await searchSeriesInfo(title);
+    const info =
+      mediaType === "movie"
+        ? await searchMovieInfo(title)
+        : await searchSeriesInfo(title);
 
     if (!info) {
       showToast("لم يتم العثور على معلومات", "info");
@@ -709,7 +766,8 @@ async function fetchEditInfo() {
     editReleaseYearInput.value = info.release_year;
     editRatingInput.value = info.rating;
 
-    if (mediaType === "series" && info.end_year) editEndYearInput.value = info.end_year;
+    if (mediaType === "series" && info.end_year)
+      editEndYearInput.value = info.end_year;
 
     if (info.poster_url) {
       editPosterImage.src = info.poster_url;
@@ -729,7 +787,9 @@ async function fetchEditInfo() {
 //  حذف وسائط (محسن)
 // ════════════════════════════════════════════════════════
 async function deleteSelected() {
-  const checkboxes = document.querySelectorAll('tbody input[type="checkbox"]:checked');
+  const checkboxes = document.querySelectorAll(
+    'tbody input[type="checkbox"]:checked',
+  );
   if (checkboxes.length === 0) {
     showToast("الرجاء تحديد عنصر واحد على الأقل للحذف", "info");
     return;
@@ -747,10 +807,15 @@ async function deleteSelected() {
   }
 
   // حذف متفائل (من الواجهة أولاً)
-  toDelete.forEach(item => item.row.remove());
+  toDelete.forEach((item) => item.row.remove());
   // تحديث currentResults (إزالة العناصر المحذوفة)
-  currentResults = currentResults.filter(item =>
-    !toDelete.some(del => del.orderNum === item.order_number && del.mediaType === item.media_type)
+  currentResults = currentResults.filter(
+    (item) =>
+      !toDelete.some(
+        (del) =>
+          del.orderNum === item.order_number &&
+          del.mediaType === item.media_type,
+      ),
   );
   // إعادة ترقيم local مؤقت (اختياري)
   // ولكن الأفضل تحديث من الخادم بعد الحذف
@@ -786,7 +851,10 @@ async function fetchMediaInfo() {
   showLoading();
 
   try {
-    const info = mediaType === "movie" ? await searchMovieInfo(title) : await searchSeriesInfo(title);
+    const info =
+      mediaType === "movie"
+        ? await searchMovieInfo(title)
+        : await searchSeriesInfo(title);
 
     if (!info) {
       showToast("لم يتم العثور على معلومات", "info");
@@ -828,14 +896,21 @@ async function searchMovieInfo(searchTitle) {
     const detailsUrl = `${TMDB_BASE_URL}/movie/${movie.id}?api_key=${TMDB_API_KEY}&language=en-US`;
     const details = await (await fetch(detailsUrl)).json();
 
-    const year = details.release_date ? details.release_date.substring(0, 4) : "";
-    const genres = details.genres ? details.genres.map(g => g.name) : [];
+    const year = details.release_date
+      ? details.release_date.substring(0, 4)
+      : "";
+    const genres = details.genres ? details.genres.map((g) => g.name) : [];
     let rating = details.vote_average || 0;
     const imdbId = details.imdb_id;
 
     if (imdbId) {
-      const imdbData = await (await fetch(`https://www.omdbapi.com/?i=${imdbId}&apikey=${OMDB_API_KEY}`)).json();
-      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A") rating = parseFloat(imdbData.imdbRating);
+      const imdbData = await (
+        await fetch(
+          `https://www.omdbapi.com/?i=${imdbId}&apikey=${OMDB_API_KEY}`,
+        )
+      ).json();
+      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A")
+        rating = parseFloat(imdbData.imdbRating);
     }
 
     return {
@@ -843,7 +918,9 @@ async function searchMovieInfo(searchTitle) {
       release_year: parseInt(year) || new Date().getFullYear(),
       genre: genres.join(", "),
       rating,
-      poster_url: details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
+      poster_url: details.poster_path
+        ? `${TMDB_IMAGE_URL}${details.poster_path}`
+        : null,
     };
   } catch (error) {
     console.error("Error fetching movie info:", error);
@@ -863,17 +940,30 @@ async function searchSeriesInfo(searchTitle) {
     const detailsUrl = `${TMDB_BASE_URL}/tv/${serie.id}?api_key=${TMDB_API_KEY}&language=en-US`;
     const details = await (await fetch(detailsUrl)).json();
 
-    const startYear = details.first_air_date ? details.first_air_date.substring(0, 4) : "";
-    let endYear = details.last_air_date ? details.last_air_date.substring(0, 4) : "";
+    const startYear = details.first_air_date
+      ? details.first_air_date.substring(0, 4)
+      : "";
+    let endYear = details.last_air_date
+      ? details.last_air_date.substring(0, 4)
+      : "";
     if (details.status === "Returning Series") endYear = "";
 
-    const genres = details.genres ? details.genres.map(g => g.name) : [];
+    const genres = details.genres ? details.genres.map((g) => g.name) : [];
     let rating = details.vote_average || 0;
 
-    const extIds = await (await fetch(`${TMDB_BASE_URL}/tv/${serie.id}/external_ids?api_key=${TMDB_API_KEY}`)).json();
+    const extIds = await (
+      await fetch(
+        `${TMDB_BASE_URL}/tv/${serie.id}/external_ids?api_key=${TMDB_API_KEY}`,
+      )
+    ).json();
     if (extIds.imdb_id) {
-      const imdbData = await (await fetch(`https://www.omdbapi.com/?i=${extIds.imdb_id}&apikey=${OMDB_API_KEY}`)).json();
-      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A") rating = parseFloat(imdbData.imdbRating);
+      const imdbData = await (
+        await fetch(
+          `https://www.omdbapi.com/?i=${extIds.imdb_id}&apikey=${OMDB_API_KEY}`,
+        )
+      ).json();
+      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A")
+        rating = parseFloat(imdbData.imdbRating);
     }
 
     const parsedStart = parseInt(startYear) || new Date().getFullYear();
@@ -885,7 +975,9 @@ async function searchSeriesInfo(searchTitle) {
       end_year: parsedEnd,
       genre: genres.join(", "),
       rating,
-      poster_url: details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
+      poster_url: details.poster_path
+        ? `${TMDB_IMAGE_URL}${details.poster_path}`
+        : null,
     };
   } catch (error) {
     console.error("Error fetching series info:", error);
@@ -957,7 +1049,8 @@ function toggleTheme() {
 // ════════════════════════════════════════════════════════
 function updateEndYearVisibility() {
   if (endYearGroup) {
-    endYearGroup.style.display = mediaTypeSelect.value === "series" ? "flex" : "none";
+    endYearGroup.style.display =
+      mediaTypeSelect.value === "series" ? "flex" : "none";
   }
 }
 
@@ -1024,7 +1117,8 @@ async function init() {
   filterTypeSelect.addEventListener("change", filterLocalResults);
   searchBtn.addEventListener("click", () => searchMedia(true));
 
-  selectAllCheckbox && selectAllCheckbox.addEventListener("change", toggleSelectAll);
+  selectAllCheckbox &&
+    selectAllCheckbox.addEventListener("change", toggleSelectAll);
   editBtn.addEventListener("click", editSelected);
   deleteBtn.addEventListener("click", deleteSelected);
   addForm.addEventListener("submit", addMedia);
@@ -1034,7 +1128,9 @@ async function init() {
   editForm.addEventListener("submit", saveChanges);
   editAutoFillBtn.addEventListener("click", fetchEditInfo);
   themeToggleBtn.addEventListener("click", toggleTheme);
-  document.getElementById("clear-form-btn").addEventListener("click", clearForm);
+  document
+    .getElementById("clear-form-btn")
+    .addEventListener("click", clearForm);
 
   // إغلاق نافذة التفاصيل
   const detClose = document.getElementById("det-close-btn");
