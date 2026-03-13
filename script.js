@@ -1,11 +1,11 @@
 // ════════════════════════════════════════════════════════
-//  CINÉMA — MEDIA VAULT  |  Script (Optimized)
-//  جميع الوظائف الأصلية محفوظة + تحسينات أداء
+//  CINÉMA — MEDIA VAULT  |  Script (Optimized for Speed)
+//  جميع الوظائف الأصلية محفوظة + تحسينات أداء كبيرة
 // ════════════════════════════════════════════════════════
 
 window.addEventListener("error", (event) => {
   console.error("Uncaught error:", event.error);
-  showToast("Error: " + (event.error ? event.error.message : "Unknown"), "error");
+  showToast("خطأ: " + (event.error ? event.error.message : "غير معروف"), "error");
 });
 
 // ── API Configuration ──
@@ -15,11 +15,11 @@ const TMDB_BASE_URL   = "https://api.themoviedb.org/3";
 const TMDB_IMAGE_URL  = "https://image.tmdb.org/t/p/w500";
 const API_BASE_URL    = "https://media-manager-backend-wfeb.onrender.com/api/media" || "http://localhost:3000/api/media";
 
-// ── Caching for performance ──
+// ── Caching ──
 const CACHE_KEY       = "cinema_media_cache";
-const CACHE_EXPIRY    = 5 * 60 * 1000; // 5 minutes
+const CACHE_EXPIRY    = 5 * 60 * 1000; // 5 دقائق
 
-// ── DOM References ──
+// ── DOM Elements ──
 const searchInput       = document.getElementById("search-input");
 const searchBySelect    = document.getElementById("search-by");
 const filterTypeSelect  = document.getElementById("filter-type");
@@ -63,17 +63,23 @@ const loadingSpinner    = document.getElementById("loading-spinner");
 const themeToggleBtn    = document.getElementById("theme-toggle-btn");
 
 // ── Global state ──
-let currentResults  = [];
-let currentGridMode = 'grid';
+let currentResults  = [];           // كل الوسائط (آخر تحميل)
+let currentGridMode = 'grid';        // grid or list
+let searchDebounceTimer = null;      // للبحث المباشر
 
-// ════════════════════════════════════════════════
-//  تحسينات الأداء: التخزين المؤقت وجلب البيانات
-// ════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+//  دوال المساعدة (Debounce)
+// ════════════════════════════════════════════════════════
+function debounce(func, delay) {
+  return function(...args) {
+    clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => func.apply(this, args), delay);
+  };
+}
 
-/**
- * جلب جميع الوسائط (أفلام ومسلسلات) مع تخزين مؤقت
- * @param {boolean} forceRefresh - تجاهل الكاش وجلب من الخادم
- */
+// ════════════════════════════════════════════════════════
+//  جلب البيانات (مع تخزين مؤقت)
+// ════════════════════════════════════════════════════════
 async function fetchAllMedia(forceRefresh = false) {
   if (!forceRefresh) {
     const cached = localStorage.getItem(CACHE_KEY);
@@ -83,50 +89,34 @@ async function fetchAllMedia(forceRefresh = false) {
         if (Date.now() - timestamp < CACHE_EXPIRY) {
           return data;
         }
-      } catch (e) {
-        // تجاهل الأخطاء في القراءة
-      }
+      } catch (e) { /* تجاهل الأخطاء */ }
     }
   }
 
   showLoading();
   try {
     const response = await fetch(`${API_BASE_URL}/all`);
-    if (!response.ok) throw new Error("Failed to fetch");
+    if (!response.ok) throw new Error("فشل الاتصال");
     const data = await response.json();
-    localStorage.setItem(
-      CACHE_KEY,
-      JSON.stringify({ data, timestamp: Date.now() })
-    );
-    hideLoading();
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: Date.now() }));
     return data;
   } catch (error) {
-    hideLoading();
-    showToast("Error fetching media", "error");
+    showToast("خطأ في جلب البيانات", "error");
     return [];
+  } finally {
+    hideLoading();
   }
 }
 
-// ════════════════════════════════════════════════
-//  API FUNCTIONS (الأصلية مع تعديلات طفيفة)
-// ════════════════════════════════════════════════
-
+// ════════════════════════════════════════════════════════
+//  دوال API (الأصلية)
+// ════════════════════════════════════════════════════════
 async function fetchMedia(mediaType) {
-  // هذه الدالة تبقى للتوافق، ولكن نفضل استخدام fetchAllMedia
   try {
-    showLoading();
     const response = await fetch(`${API_BASE_URL}?type=${mediaType}`);
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    const text = await response.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch (e) {
-      throw new Error(`Invalid JSON response: ${text.substring(0, 100)}...`);
-    }
-    hideLoading();
-    if (!Array.isArray(data)) return [];
-    return data.map((item) => ({
+    const data = await response.json();
+    return data.map(item => ({
       ...item,
       order_number: parseInt(item.order_number) || 0,
       release_year: parseInt(item.release_year) || 0,
@@ -134,199 +124,105 @@ async function fetchMedia(mediaType) {
       rating: parseFloat(item.rating) || 0,
     }));
   } catch (error) {
-    hideLoading();
-    showToast(`Error fetching ${mediaType}: ${error.message}`, "error");
+    showToast(`خطأ في جلب ${mediaType}`, "error");
     return [];
   }
 }
 
 async function saveMedia(mediaType, mediaData) {
   try {
-    showLoading();
     const response = await fetch(API_BASE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: mediaType, data: mediaData }),
     });
     const result = await response.json();
-    hideLoading();
     return result.success;
   } catch (error) {
-    hideLoading();
-    showToast("Error saving media", "error");
+    showToast("خطأ في الحفظ", "error");
     return false;
   }
 }
 
 async function updateMedia(mediaType, orderNumber, mediaData) {
   try {
-    showLoading();
     const response = await fetch(API_BASE_URL, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: mediaType, order_number: orderNumber, data: mediaData }),
     });
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    const text = await response.text();
-    let result;
-    try {
-      result = JSON.parse(text);
-    } catch (e) {
-      throw new Error(`Invalid JSON: ${text.substring(0, 100)}...`);
-    }
-    hideLoading();
-    if (result.error) throw new Error(result.error);
+    const result = await response.json();
     return result.success === true;
   } catch (error) {
-    hideLoading();
-    showToast("Error updating media: " + error.message, "error");
+    showToast("خطأ في التحديث", "error");
     return false;
   }
 }
 
 async function deleteMedia(mediaType, orderNumber) {
   try {
-    showLoading();
     const response = await fetch(API_BASE_URL, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ type: mediaType, order_number: orderNumber }),
     });
     const result = await response.json();
-    hideLoading();
     return result.success;
   } catch (error) {
-    hideLoading();
-    showToast("Error deleting media", "error");
+    showToast("خطأ في الحذف", "error");
     return false;
   }
 }
 
-// ════════════════════════════════════════════════
-//  CORE FUNCTIONS
-// ════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+//  البحث المباشر (فلترة محلية)
+// ════════════════════════════════════════════════════════
+function filterLocalResults() {
+  const query = searchInput.value.trim().toLowerCase();
+  const by = searchBySelect.value;
+  const type = filterTypeSelect.value;
 
-async function init() {
-  // Theme
-  if (localStorage.getItem("darkMode") === "false") {
-    document.body.classList.add("light-theme");
-    themeToggleBtn.querySelector("i").classList.replace("fa-moon", "fa-sun");
-  }
+  let filtered = currentResults.filter(item => {
+    if (type !== "all" && item.media_type !== type) return false;
+    if (!query) return true;
 
-  updateEndYearVisibility();
-  await searchMedia(); // أول تحميل
+    const val = item[by];
+    if (val == null) return false;
 
-  // Event listeners
-  searchBtn.addEventListener("click", () => searchMedia());
-  searchInput.addEventListener("keypress", (e) => {
-    if (e.key === "Enter") searchMedia();
+    if (by === "title" || by === "genre") {
+      return val.toLowerCase().includes(query);
+    } else if (by === "release_year") {
+      return val.toString() === query;
+    } else if (by === "rating") {
+      return parseFloat(val) === parseFloat(query);
+    }
+    return false;
   });
-  selectAllCheckbox && selectAllCheckbox.addEventListener("change", toggleSelectAll);
-  editBtn.addEventListener("click", editSelected);
-  deleteBtn.addEventListener("click", deleteSelected);
-  addForm.addEventListener("submit", addMedia);
-  mediaTypeSelect.addEventListener("change", updateEndYearVisibility);
-  autoFillBtn.addEventListener("click", fetchMediaInfo);
-  closeModalBtn && closeModalBtn.addEventListener("click", closeModal);
-  editForm.addEventListener("submit", saveChanges);
-  editAutoFillBtn.addEventListener("click", fetchEditInfo);
-  themeToggleBtn.addEventListener("click", toggleTheme);
-  document.getElementById("clear-form-btn").addEventListener("click", clearForm);
 
-  // Detail modal close
-  const detClose = document.getElementById("det-close-btn");
-  if (detClose) detClose.addEventListener("click", () => closeDetailModal());
-  const detCloseCta = document.querySelector(".det-close-cta");
-  if (detCloseCta) detCloseCta.addEventListener("click", () => closeDetailModal());
-  const detOverlay = document.getElementById("detail-modal");
-  if (detOverlay) {
-    detOverlay.addEventListener("click", (e) => {
-      if (e.target === detOverlay) closeDetailModal();
-    });
-  }
+  // ترتيب حسب order_number
+  filtered.sort((a, b) => a.order_number - b.order_number);
 
-  // Edit modal close
-  window.addEventListener("click", (e) => {
-    if (e.target === editModal) closeModal();
-  });
+  // إضافة display_year
+  filtered = filtered.map(item => ({
+    ...item,
+    display_year:
+      item.media_type === "series" && item.end_year
+        ? item.release_year === item.end_year
+          ? item.release_year
+          : `${item.release_year}–${item.end_year}`
+        : item.release_year,
+  }));
+
+  // تحديث واجهة العرض
+  updateResultsTable(filtered);
 }
 
-function toggleTheme() {
-  document.body.classList.toggle("light-theme");
-  const isLight = document.body.classList.contains("light-theme");
-  localStorage.setItem("darkMode", isLight ? "false" : "true");
-  const icon = themeToggleBtn.querySelector("i");
-  if (isLight) {
-    icon.classList.replace("fa-moon", "fa-sun");
-  } else {
-    icon.classList.replace("fa-sun", "fa-moon");
-  }
-}
-
-function updateEndYearVisibility() {
-  if (endYearGroup) {
-    endYearGroup.style.display = mediaTypeSelect.value === "series" ? "flex" : "none";
-  }
-}
-
-function toggleSelectAll() {
-  const checkboxes = document.querySelectorAll('tbody input[type="checkbox"]');
-  checkboxes.forEach((cb) => {
-    cb.checked = selectAllCheckbox.checked;
-    const row = cb.closest("tr");
-    row && (selectAllCheckbox.checked ? row.classList.add("selected") : row.classList.remove("selected"));
-  });
-  // Sync card selections
-  const cards = document.querySelectorAll(".media-card");
-  cards.forEach((card) => {
-    selectAllCheckbox.checked ? card.classList.add("selected") : card.classList.remove("selected");
-    const chk = card.querySelector(".card-chk");
-    if (chk) chk.checked = selectAllCheckbox.checked;
-  });
-}
-
-function toggleRowSelection(checkbox) {
-  const row = checkbox.closest("tr");
-  if (checkbox.checked) {
-    row.classList.add("selected");
-  } else {
-    row.classList.remove("selected");
-    if (selectAllCheckbox) selectAllCheckbox.checked = false;
-  }
-}
-window.toggleRowSelection = toggleRowSelection;
-
-// ════════════════════════════════════════════════
-//  SEARCH & DISPLAY (مُعاد كتابتها لاستخدام الكاش)
-// ════════════════════════════════════════════════
-
+// البحث من الخادم (تحديث البيانات المخزنة)
 async function searchMedia(forceRefresh = false) {
-  const searchQuery = searchInput.value.toLowerCase();
-  const searchBy    = searchBySelect.value;
-  const filterType  = filterTypeSelect.value;
-
   try {
     const allMedia = await fetchAllMedia(forceRefresh);
-    let results = allMedia.filter((item) => {
-      if (filterType !== "all" && item.media_type !== filterType) return false;
-      if (!searchQuery) return true;
-      const val = item[searchBy];
-      if (val == null) return false;
-      if (searchBy === "title" || searchBy === "genre") {
-        return val.toLowerCase().includes(searchQuery);
-      } else if (searchBy === "release_year") {
-        return val.toString() === searchQuery;
-      } else if (searchBy === "rating") {
-        return parseFloat(val) === parseFloat(searchQuery);
-      }
-      return true;
-    });
-
-    // ترتيب حسب order_number
-    results.sort((a, b) => a.order_number - b.order_number);
-
-    // إضافة display_year
-    results = results.map((item) => ({
+    currentResults = allMedia.map(item => ({
       ...item,
       display_year:
         item.media_type === "series" && item.end_year
@@ -335,19 +231,19 @@ async function searchMedia(forceRefresh = false) {
             : `${item.release_year}–${item.end_year}`
           : item.release_year,
     }));
-
-    updateResultsTable(results);
+    filterLocalResults(); // تطبيق الفلاتر الحالية على البيانات الجديدة
   } catch (error) {
-    showToast("Error searching media: " + error.message, "error");
+    showToast("خطأ في البحث: " + error.message, "error");
   }
 }
 
+// ════════════════════════════════════════════════════════
+//  تحديث الجدول والبطاقات
+// ════════════════════════════════════════════════════════
 function updateResultsTable(results) {
-  currentResults = results;
-
   // تحديث الجدول
   resultsBody.innerHTML = "";
-  results.forEach((item) => {
+  results.forEach(item => {
     const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0;
     const row = document.createElement("tr");
     row.innerHTML = `
@@ -363,15 +259,13 @@ function updateResultsTable(results) {
   });
 
   // تحديث الحالة
-  if (statusLabel) {
-    statusLabel.textContent =
-      results.length > 0
-        ? `${results.length} title${results.length !== 1 ? "s" : ""} in collection`
-        : "No results found";
-  }
+  statusLabel.textContent = results.length > 0
+    ? `${results.length} عنوان${results.length !== 1 ? "ات" : ""} في المجموعة`
+    : "لا توجد نتائج";
 
   // تحديث البطاقات
   updateCardGrid(results);
+
   // تحديث الإحصائيات
   updateStats(results);
 
@@ -379,10 +273,6 @@ function updateResultsTable(results) {
   const empty = document.getElementById("empty-state");
   if (empty) empty.style.display = results.length === 0 ? "flex" : "none";
 }
-
-// ════════════════════════════════════════════════
-//  CARD GRID (بدون تغيير)
-// ════════════════════════════════════════════════
 
 function updateCardGrid(results) {
   const grid = document.getElementById("card-grid");
@@ -439,7 +329,7 @@ function toggleCardSelection(checkbox, index) {
     card.classList.remove("selected");
     if (selectAllCheckbox) selectAllCheckbox.checked = false;
   }
-  // Sync table checkbox
+  // مزامنة مع الجدول
   const tableCheckboxes = document.querySelectorAll("#results-body input[type='checkbox']");
   if (tableCheckboxes[index]) {
     tableCheckboxes[index].checked = checkbox.checked;
@@ -448,18 +338,43 @@ function toggleCardSelection(checkbox, index) {
 }
 window.toggleCardSelection = toggleCardSelection;
 
-// ════════════════════════════════════════════════
-//  STATS (بدون تغيير)
-// ════════════════════════════════════════════════
+function toggleRowSelection(checkbox) {
+  const row = checkbox.closest("tr");
+  if (checkbox.checked) {
+    row.classList.add("selected");
+  } else {
+    row.classList.remove("selected");
+    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+  }
+}
+window.toggleRowSelection = toggleRowSelection;
 
+function toggleSelectAll() {
+  const checkboxes = document.querySelectorAll('tbody input[type="checkbox"]');
+  checkboxes.forEach((cb) => {
+    cb.checked = selectAllCheckbox.checked;
+    const row = cb.closest("tr");
+    row && (selectAllCheckbox.checked ? row.classList.add("selected") : row.classList.remove("selected"));
+  });
+  // مزامنة البطاقات
+  const cards = document.querySelectorAll(".media-card");
+  cards.forEach((card) => {
+    selectAllCheckbox.checked ? card.classList.add("selected") : card.classList.remove("selected");
+    const chk = card.querySelector(".card-chk");
+    if (chk) chk.checked = selectAllCheckbox.checked;
+  });
+}
+
+// ════════════════════════════════════════════════════════
+//  الإحصائيات
+// ════════════════════════════════════════════════════════
 function updateStats(results) {
-  const movies = results.filter((r) => r.media_type === "movie");
-  const series = results.filter((r) => r.media_type === "series");
+  const movies = results.filter(r => r.media_type === "movie");
+  const series = results.filter(r => r.media_type === "series");
   const topItem = results.reduce((best, r) => (!best || r.rating > best.rating ? r : best), null);
-  const avg =
-    results.length > 0
-      ? (results.reduce((s, r) => s + (parseFloat(r.rating) || 0), 0) / results.length).toFixed(1)
-      : "—";
+  const avg = results.length > 0
+    ? (results.reduce((s, r) => s + (parseFloat(r.rating) || 0), 0) / results.length).toFixed(1)
+    : "—";
 
   const el = (id) => document.getElementById(id);
   if (el("stat-movies")) el("stat-movies").textContent = movies.length;
@@ -468,10 +383,9 @@ function updateStats(results) {
   if (el("stat-top")) el("stat-top").textContent = topItem ? topItem.title : "—";
 }
 
-// ════════════════════════════════════════════════
-//  DETAIL MODAL (بدون تغيير)
-// ════════════════════════════════════════════════
-
+// ════════════════════════════════════════════════════════
+//  التفاصيل (Detail Modal)
+// ════════════════════════════════════════════════════════
 function showDetailModal(item) {
   const overlay = document.getElementById("detail-modal");
   if (!overlay) return;
@@ -494,7 +408,7 @@ function showDetailModal(item) {
   }
 
   const typeBadge = document.getElementById("detail-type");
-  typeBadge.textContent = item.media_type === "movie" ? "🎬 Movie" : "📺 Series";
+  typeBadge.textContent = item.media_type === "movie" ? "🎬 فيلم" : "📺 مسلسل";
   typeBadge.className = `det-type-badge ${item.media_type}`;
 
   document.getElementById("detail-title").textContent = item.title;
@@ -514,9 +428,9 @@ function showDetailModal(item) {
     <div class="rating-number">${rating.toFixed(1)}<span>/10</span></div>
   `;
 
-  const genres = item.genre.split(",").map((g) => g.trim());
+  const genres = item.genre.split(",").map(g => g.trim());
   document.getElementById("detail-genre-tags").innerHTML = genres
-    .map((g) => `<span class="genre-tag">${escapeHtml(g)}</span>`)
+    .map(g => `<span class="genre-tag">${escapeHtml(g)}</span>`)
     .join("");
 
   document.getElementById("detail-edit-btn").onclick = () => {
@@ -526,7 +440,6 @@ function showDetailModal(item) {
 
   overlay.style.display = "flex";
   document.body.style.overflow = "hidden";
-
   document.addEventListener("keydown", handleDetEscape);
 }
 
@@ -545,7 +458,6 @@ window.closeDetailModal = closeDetailModal;
 
 function editItemDirectly(item) {
   const rows = document.querySelectorAll("#results-body tr");
-  let found = false;
   rows.forEach((row) => {
     const oCell = row.cells[1];
     const tCell = row.cells[6];
@@ -559,17 +471,431 @@ function editItemDirectly(item) {
       if (cb) {
         cb.checked = true;
         toggleRowSelection(cb);
-        found = true;
       }
     }
   });
-  if (found) editSelected();
+  editSelected();
 }
 
-// ════════════════════════════════════════════════
-//  VIEW SWITCHING (بدون تغيير)
-// ════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+//  إضافة وسائط
+// ════════════════════════════════════════════════════════
+async function addMedia(e) {
+  e.preventDefault();
+  const title = titleInput.value.trim();
+  const genre = genreInput.value.trim();
+  const mediaType = mediaTypeSelect.value;
 
+  if (!title || !genre) {
+    showToast("الرجاء ملء جميع الحقول المطلوبة", "error");
+    return;
+  }
+
+  try {
+    const releaseYear = parseInt(releaseYearInput.value);
+    const rating = parseFloat(ratingInput.value);
+
+    if (isNaN(releaseYear)) {
+      showToast("سنة الإصدار يجب أن تكون رقماً", "error");
+      return;
+    }
+    if (isNaN(rating)) {
+      showToast("التقييم يجب أن يكون رقماً", "error");
+      return;
+    }
+    if (rating < 0 || rating > 10) {
+      showToast("التقييم يجب أن يكون بين 0 و 10", "error");
+      return;
+    }
+
+    const newMedia = {
+      title,
+      genre,
+      release_year: releaseYear,
+      rating,
+      poster_url: posterImage.src && posterImage.src.startsWith("http") ? posterImage.src : null,
+    };
+
+    if (mediaType === "series") {
+      const endYear = endYearInput.value.trim() ? parseInt(endYearInput.value) : releaseYear;
+      if (endYear < releaseYear) {
+        showToast("سنة النهاية يجب أن تكون ≥ سنة البداية", "error");
+        return;
+      }
+      newMedia.end_year = endYear;
+    }
+
+    // التحقق من التكرار (محلياً)
+    const existing = currentResults.filter(item => item.media_type === mediaType);
+    const isDuplicate = existing.some(
+      item => item.title && item.title.toLowerCase() === title.toLowerCase()
+    );
+    if (isDuplicate) {
+      showToast(`"${title}" موجود بالفعل! 🎬`, "error");
+      return;
+    }
+
+    const success = await saveMedia(mediaType, newMedia);
+    if (success) {
+      showToast(`"${title}" أضيف بنجاح!`, "success");
+      clearForm();
+      // تحديث البيانات من الخادم
+      await searchMedia(true);
+      switchView("collection");
+    } else {
+      showToast("فشلت الإضافة", "error");
+    }
+  } catch (error) {
+    showToast("خطأ في الإضافة: " + error.message, "error");
+  }
+}
+
+function clearForm() {
+  addForm.reset();
+  posterImage.src = "";
+  posterImage.style.display = "none";
+  posterPlaceholder.style.display = "flex";
+  updateEndYearVisibility();
+  titleInput.focus();
+  showToast("تم مسح النموذج", "info");
+}
+
+// ════════════════════════════════════════════════════════
+//  تعديل وسائط
+// ════════════════════════════════════════════════════════
+async function editSelected() {
+  try {
+    const checkboxes = document.querySelectorAll('tbody input[type="checkbox"]:checked');
+    if (checkboxes.length !== 1) {
+      showToast("الرجاء تحديد عنصر واحد فقط للتعديل", "info");
+      return;
+    }
+
+    const row = checkboxes[0].closest("tr");
+    const cells = row.cells;
+    if (!cells || cells.length < 7) {
+      showToast("خطأ: بيانات غير صالحة", "error");
+      return;
+    }
+
+    const orderNumber = parseInt(cells[1].textContent);
+    const title = cells[2].textContent;
+    const mediaType = cells[6].textContent.toLowerCase();
+
+    // البحث في currentResults بدلاً من fetch
+    let mediaItem = currentResults.find(
+      item => item.order_number === orderNumber && item.media_type === mediaType
+    );
+
+    if (!mediaItem) {
+      showToast("لم يتم العثور على العنصر", "error");
+      return;
+    }
+
+    editOrderInput.value = orderNumber;
+    editTitleInput.value = mediaItem.title || "";
+    editGenreInput.value = mediaItem.genre || "";
+    editReleaseYearInput.value = mediaItem.release_year || "";
+    editRatingInput.value = mediaItem.rating || "";
+    editMediaTypeInput.value = mediaType;
+
+    if (mediaType === "series") {
+      editEndYearGroup.style.display = "flex";
+      editEndYearInput.value = mediaItem.end_year || mediaItem.release_year || "";
+    } else {
+      editEndYearGroup.style.display = "none";
+    }
+
+    if (mediaItem.poster_url) {
+      editPosterImage.src = mediaItem.poster_url;
+      editPosterImage.style.display = "block";
+      editPosterPlaceholder.style.display = "none";
+    } else {
+      editPosterImage.style.display = "none";
+      editPosterPlaceholder.style.display = "flex";
+    }
+
+    editModal.style.display = "flex";
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleEditEscape);
+  } catch (error) {
+    showToast("خطأ في التعديل: " + error.message, "error");
+  }
+}
+
+function handleEditEscape(e) {
+  if (e.key === "Escape") closeModal();
+}
+
+function closeModal() {
+  editModal.style.display = "none";
+  document.body.style.overflow = "";
+  document.removeEventListener("keydown", handleEditEscape);
+}
+
+async function saveChanges(e) {
+  e.preventDefault();
+
+  try {
+    const orderNumber = parseInt(editOrderInput.value);
+    const title = editTitleInput.value.trim();
+    const genre = editGenreInput.value.trim();
+    const mediaType = editMediaTypeInput.value;
+
+    if (!title || !genre) {
+      showToast("الرجاء ملء جميع الحقول المطلوبة", "error");
+      return;
+    }
+
+    const releaseYear = parseInt(editReleaseYearInput.value) || new Date().getFullYear();
+    const rating = parseFloat(editRatingInput.value) || 0;
+
+    if (rating < 0 || rating > 10) {
+      showToast("التقييم يجب أن يكون بين 0 و 10", "error");
+      return;
+    }
+
+    const updatedMedia = {
+      title,
+      genre,
+      release_year: releaseYear,
+      rating,
+      poster_url: editPosterImage.style.display === "block" ? editPosterImage.src : null,
+    };
+
+    if (mediaType === "series") {
+      const endYear = parseInt(editEndYearInput.value) || releaseYear;
+      if (endYear < releaseYear) {
+        showToast("سنة النهاية يجب أن تكون ≥ سنة البداية", "error");
+        return;
+      }
+      updatedMedia.end_year = endYear;
+    }
+
+    const success = await updateMedia(mediaType, orderNumber, updatedMedia);
+    if (success) {
+      showToast(`"${title}" تحديث بنجاح!`, "success");
+      closeModal();
+      // تحديث البيانات من الخادم
+      await searchMedia(true);
+    } else {
+      showToast("فشل التحديث", "error");
+    }
+  } catch (error) {
+    showToast("خطأ في التحديث: " + error.message, "error");
+  }
+}
+
+async function fetchEditInfo() {
+  const title = editTitleInput.value.trim();
+  if (!title) {
+    showToast("الرجاء إدخال عنوان للبحث", "error");
+    return;
+  }
+
+  const mediaType = editMediaTypeInput.value;
+  showLoading();
+
+  try {
+    const info = mediaType === "movie" ? await searchMovieInfo(title) : await searchSeriesInfo(title);
+
+    if (!info) {
+      showToast("لم يتم العثور على معلومات", "info");
+      return;
+    }
+
+    editTitleInput.value = info.title;
+    editGenreInput.value = info.genre;
+    editReleaseYearInput.value = info.release_year;
+    editRatingInput.value = info.rating;
+
+    if (mediaType === "series" && info.end_year) editEndYearInput.value = info.end_year;
+
+    if (info.poster_url) {
+      editPosterImage.src = info.poster_url;
+      editPosterImage.style.display = "block";
+      editPosterPlaceholder.style.display = "none";
+    }
+
+    showToast(`تم تحميل معلومات "${info.title}"!`, "success");
+  } catch (error) {
+    showToast("خطأ في جلب المعلومات", "error");
+  } finally {
+    hideLoading();
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//  حذف وسائط (محسن)
+// ════════════════════════════════════════════════════════
+async function deleteSelected() {
+  const checkboxes = document.querySelectorAll('tbody input[type="checkbox"]:checked');
+  if (checkboxes.length === 0) {
+    showToast("الرجاء تحديد عنصر واحد على الأقل للحذف", "info");
+    return;
+  }
+  if (!confirm(`هل أنت متأكد من حذف ${checkboxes.length} عنصر؟`)) return;
+
+  // جمع البيانات للحذف
+  const toDelete = [];
+  for (const cb of checkboxes) {
+    const row = cb.closest("tr");
+    const cells = row.cells;
+    const orderNum = parseInt(cells[1].textContent);
+    const mediaType = cells[6].textContent.toLowerCase();
+    toDelete.push({ orderNum, mediaType, row });
+  }
+
+  // حذف متفائل (من الواجهة أولاً)
+  toDelete.forEach(item => item.row.remove());
+  // تحديث currentResults (إزالة العناصر المحذوفة)
+  currentResults = currentResults.filter(item =>
+    !toDelete.some(del => del.orderNum === item.order_number && del.mediaType === item.media_type)
+  );
+  // إعادة ترقيم local مؤقت (اختياري)
+  // ولكن الأفضل تحديث من الخادم بعد الحذف
+
+  // تنفيذ الحذف الفعلي على الخادم
+  let allSuccess = true;
+  for (const item of toDelete) {
+    const success = await deleteMedia(item.mediaType, item.orderNum);
+    if (!success) allSuccess = false;
+  }
+
+  if (allSuccess) {
+    showToast("تم الحذف بنجاح!", "success");
+    // تحديث البيانات من الخادم لضمان المزامنة
+    await searchMedia(true);
+  } else {
+    showToast("بعض العناصر لم تُحذف", "error");
+    await searchMedia(true); // استعادة الحالة الصحيحة
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//  دوال Auto-Fill (TMDB/OMDB) - بدون تغيير
+// ════════════════════════════════════════════════════════
+async function fetchMediaInfo() {
+  const title = titleInput.value.trim();
+  if (!title) {
+    showToast("الرجاء إدخال عنوان للبحث", "error");
+    return;
+  }
+
+  const mediaType = mediaTypeSelect.value;
+  showLoading();
+
+  try {
+    const info = mediaType === "movie" ? await searchMovieInfo(title) : await searchSeriesInfo(title);
+
+    if (!info) {
+      showToast("لم يتم العثور على معلومات", "info");
+      return;
+    }
+
+    titleInput.value = info.title;
+    genreInput.value = info.genre;
+    releaseYearInput.value = info.release_year;
+    ratingInput.value = info.rating;
+
+    if (mediaType === "series" && info.end_year) {
+      endYearInput.value = info.end_year;
+    }
+
+    if (info.poster_url) {
+      posterImage.src = info.poster_url;
+      posterImage.style.display = "block";
+      posterPlaceholder.style.display = "none";
+    }
+
+    showToast(`تم تحميل معلومات "${info.title}"!`, "success");
+  } catch (error) {
+    showToast("خطأ في جلب المعلومات", "error");
+  } finally {
+    hideLoading();
+  }
+}
+
+async function searchMovieInfo(searchTitle) {
+  try {
+    const searchUrl = `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}&language=en-US`;
+    const response = await fetch(searchUrl);
+    const data = await response.json();
+
+    if (!data.results || data.results.length === 0) return null;
+
+    const movie = data.results[0];
+    const detailsUrl = `${TMDB_BASE_URL}/movie/${movie.id}?api_key=${TMDB_API_KEY}&language=en-US`;
+    const details = await (await fetch(detailsUrl)).json();
+
+    const year = details.release_date ? details.release_date.substring(0, 4) : "";
+    const genres = details.genres ? details.genres.map(g => g.name) : [];
+    let rating = details.vote_average || 0;
+    const imdbId = details.imdb_id;
+
+    if (imdbId) {
+      const imdbData = await (await fetch(`https://www.omdbapi.com/?i=${imdbId}&apikey=${OMDB_API_KEY}`)).json();
+      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A") rating = parseFloat(imdbData.imdbRating);
+    }
+
+    return {
+      title: details.title || "",
+      release_year: parseInt(year) || new Date().getFullYear(),
+      genre: genres.join(", "),
+      rating,
+      poster_url: details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
+    };
+  } catch (error) {
+    console.error("Error fetching movie info:", error);
+    throw error;
+  }
+}
+
+async function searchSeriesInfo(searchTitle) {
+  try {
+    const searchUrl = `${TMDB_BASE_URL}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}&language=en-US`;
+    const response = await fetch(searchUrl);
+    const data = await response.json();
+
+    if (!data.results || data.results.length === 0) return null;
+
+    const serie = data.results[0];
+    const detailsUrl = `${TMDB_BASE_URL}/tv/${serie.id}?api_key=${TMDB_API_KEY}&language=en-US`;
+    const details = await (await fetch(detailsUrl)).json();
+
+    const startYear = details.first_air_date ? details.first_air_date.substring(0, 4) : "";
+    let endYear = details.last_air_date ? details.last_air_date.substring(0, 4) : "";
+    if (details.status === "Returning Series") endYear = "";
+
+    const genres = details.genres ? details.genres.map(g => g.name) : [];
+    let rating = details.vote_average || 0;
+
+    const extIds = await (await fetch(`${TMDB_BASE_URL}/tv/${serie.id}/external_ids?api_key=${TMDB_API_KEY}`)).json();
+    if (extIds.imdb_id) {
+      const imdbData = await (await fetch(`https://www.omdbapi.com/?i=${extIds.imdb_id}&apikey=${OMDB_API_KEY}`)).json();
+      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A") rating = parseFloat(imdbData.imdbRating);
+    }
+
+    const parsedStart = parseInt(startYear) || new Date().getFullYear();
+    const parsedEnd = endYear ? parseInt(endYear) : parsedStart;
+
+    return {
+      title: details.name || "",
+      release_year: parsedStart,
+      end_year: parsedEnd,
+      genre: genres.join(", "),
+      rating,
+      poster_url: details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
+    };
+  } catch (error) {
+    console.error("Error fetching series info:", error);
+    throw error;
+  }
+}
+
+// ════════════════════════════════════════════════════════
+//  تبديل العرض (Collection / Add)
+// ════════════════════════════════════════════════════════
 function switchView(view) {
   const colView = document.getElementById("view-collection");
   const addView = document.getElementById("view-add");
@@ -611,490 +937,33 @@ function toggleGridView(mode) {
 }
 window.toggleGridView = toggleGridView;
 
-// ════════════════════════════════════════════════
-//  ADD MEDIA (مُعدل لتحديث الكاش بعد الإضافة)
-// ════════════════════════════════════════════════
-
-async function addMedia(e) {
-  e.preventDefault();
-  const title = titleInput.value.trim();
-  const genre = genreInput.value.trim();
-  const mediaType = mediaTypeSelect.value;
-
-  if (!title || !genre) {
-    showToast("Please fill in all required fields", "error");
-    return;
-  }
-
-  try {
-    const releaseYear = parseInt(releaseYearInput.value);
-    const rating = parseFloat(ratingInput.value);
-
-    if (isNaN(releaseYear)) {
-      showToast("Release year must be a valid number", "error");
-      return;
-    }
-    if (isNaN(rating)) {
-      showToast("Rating must be a valid number", "error");
-      return;
-    }
-    if (rating < 0 || rating > 10) {
-      showToast("Rating must be between 0 and 10", "error");
-      return;
-    }
-
-    const newMedia = {
-      title,
-      genre,
-      release_year: releaseYear,
-      rating,
-      poster_url: posterImage.src && posterImage.src.startsWith("http") ? posterImage.src : null,
-    };
-
-    if (mediaType === "series") {
-      const endYear = endYearInput.value.trim() ? parseInt(endYearInput.value) : releaseYear;
-      if (endYear < releaseYear) {
-        showToast("End year must be ≥ release year", "error");
-        return;
-      }
-      newMedia.end_year = endYear;
-    }
-
-    // Duplicate check باستخدام الكاش أولاً
-    const cached = await fetchAllMedia(false);
-    const existing = cached.filter((item) => item.media_type === mediaType);
-    const isDuplicate = existing.some(
-      (item) => item.title && item.title.toLowerCase() === title.toLowerCase()
-    );
-    if (isDuplicate) {
-      showToast(`"${title}" is already in your vault as a ${mediaType}! 🎬`, "error");
-      return;
-    }
-
-    const success = await saveMedia(mediaType, newMedia);
-    if (success) {
-      showToast(`"${title}" added to your vault! 🎬`, "success");
-      clearForm();
-      // تحديث الكاش بالقوة
-      await fetchAllMedia(true);
-      await searchMedia();
-      setTimeout(() => switchView("collection"), 1200);
-    } else {
-      showToast("Failed to add media", "error");
-    }
-  } catch (error) {
-    showToast("Error adding media: " + error.message, "error");
+// ════════════════════════════════════════════════════════
+//  الثيم (الوضع المظلم/الفاتح)
+// ════════════════════════════════════════════════════════
+function toggleTheme() {
+  document.body.classList.toggle("light-theme");
+  const isLight = document.body.classList.contains("light-theme");
+  localStorage.setItem("darkMode", isLight ? "false" : "true");
+  const icon = themeToggleBtn.querySelector("i");
+  if (isLight) {
+    icon.classList.replace("fa-moon", "fa-sun");
+  } else {
+    icon.classList.replace("fa-sun", "fa-moon");
   }
 }
 
-function clearForm() {
-  addForm.reset();
-  posterImage.src = "";
-  posterImage.style.display = "none";
-  posterPlaceholder.style.display = "flex";
-  updateEndYearVisibility();
-  titleInput.focus();
-  showToast("Form cleared", "info");
-}
-
-// ════════════════════════════════════════════════
-//  AUTO-FILL (بدون تغيير)
-// ════════════════════════════════════════════════
-
-async function fetchMediaInfo() {
-  const title = titleInput.value.trim();
-  if (!title) {
-    showToast("Please enter a title to search", "error");
-    return;
-  }
-
-  const mediaType = mediaTypeSelect.value;
-  showLoading();
-
-  try {
-    const info = mediaType === "movie" ? await searchMovieInfo(title) : await searchSeriesInfo(title);
-
-    hideLoading();
-    if (!info) {
-      showToast("No info found. Please check the title.", "info");
-      return;
-    }
-
-    titleInput.value = info.title;
-    genreInput.value = info.genre;
-    releaseYearInput.value = info.release_year;
-    ratingInput.value = info.rating;
-
-    if (mediaType === "series" && info.end_year) {
-      endYearInput.value = info.end_year;
-    }
-
-    if (info.poster_url) {
-      posterImage.src = info.poster_url;
-      posterImage.style.display = "block";
-      posterPlaceholder.style.display = "none";
-    }
-
-    showToast(`"${info.title}" info loaded! ✨`, "success");
-  } catch (error) {
-    hideLoading();
-    showToast("Error fetching info: " + error.message, "error");
+// ════════════════════════════════════════════════════════
+//  إظهار/إخفاء حقل End Year للمسلسلات
+// ════════════════════════════════════════════════════════
+function updateEndYearVisibility() {
+  if (endYearGroup) {
+    endYearGroup.style.display = mediaTypeSelect.value === "series" ? "flex" : "none";
   }
 }
 
-// ════════════════════════════════════════════════
-//  TMDB / OMDB (بدون تغيير)
-// ════════════════════════════════════════════════
-
-async function searchMovieInfo(searchTitle) {
-  try {
-    const searchUrl = `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(
-      searchTitle
-    )}&language=en-US`;
-    const response = await fetch(searchUrl);
-    const data = await response.json();
-
-    if (!data.results || data.results.length === 0) return null;
-
-    const movie = data.results[0];
-    const detailsUrl = `${TMDB_BASE_URL}/movie/${movie.id}?api_key=${TMDB_API_KEY}&language=en-US`;
-    const details = await (await fetch(detailsUrl)).json();
-
-    const year = details.release_date ? details.release_date.substring(0, 4) : "";
-    const genres = details.genres ? details.genres.map((g) => g.name) : [];
-    let rating = details.vote_average || 0;
-    const imdbId = details.imdb_id;
-
-    if (imdbId) {
-      const imdbData = await (
-        await fetch(`https://www.omdbapi.com/?i=${imdbId}&apikey=${OMDB_API_KEY}`)
-      ).json();
-      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A") rating = parseFloat(imdbData.imdbRating);
-    }
-
-    return {
-      title: details.title || "",
-      release_year: parseInt(year) || new Date().getFullYear(),
-      genre: genres.join(", "),
-      rating,
-      poster_url: details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
-    };
-  } catch (error) {
-    console.error("Error fetching movie info:", error);
-    throw error;
-  }
-}
-
-async function searchSeriesInfo(searchTitle) {
-  try {
-    const searchUrl = `${TMDB_BASE_URL}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(
-      searchTitle
-    )}&language=en-US`;
-    const response = await fetch(searchUrl);
-    const data = await response.json();
-
-    if (!data.results || data.results.length === 0) return null;
-
-    const serie = data.results[0];
-    const detailsUrl = `${TMDB_BASE_URL}/tv/${serie.id}?api_key=${TMDB_API_KEY}&language=en-US`;
-    const details = await (await fetch(detailsUrl)).json();
-
-    const startYear = details.first_air_date ? details.first_air_date.substring(0, 4) : "";
-    let endYear = details.last_air_date ? details.last_air_date.substring(0, 4) : "";
-    if (details.status === "Returning Series") endYear = "";
-
-    const genres = details.genres ? details.genres.map((g) => g.name) : [];
-    let rating = details.vote_average || 0;
-
-    const extIds = await (
-      await fetch(`${TMDB_BASE_URL}/tv/${serie.id}/external_ids?api_key=${TMDB_API_KEY}`)
-    ).json();
-    if (extIds.imdb_id) {
-      const imdbData = await (
-        await fetch(`https://www.omdbapi.com/?i=${extIds.imdb_id}&apikey=${OMDB_API_KEY}`)
-      ).json();
-      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A") rating = parseFloat(imdbData.imdbRating);
-    }
-
-    const parsedStart = parseInt(startYear) || new Date().getFullYear();
-    const parsedEnd = endYear ? parseInt(endYear) : parsedStart;
-
-    return {
-      title: details.name || "",
-      release_year: parsedStart,
-      end_year: parsedEnd,
-      genre: genres.join(", "),
-      rating,
-      poster_url: details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
-    };
-  } catch (error) {
-    console.error("Error fetching series info:", error);
-    throw error;
-  }
-}
-
-// ════════════════════════════════════════════════
-//  EDIT (بدون تغيير)
-// ════════════════════════════════════════════════
-
-async function editSelected() {
-  try {
-    const checkboxes = document.querySelectorAll('tbody input[type="checkbox"]:checked');
-    if (checkboxes.length !== 1) {
-      showToast("Please select exactly one item to edit", "info");
-      return;
-    }
-
-    const row = checkboxes[0].closest("tr");
-    const cells = row.cells;
-    if (!cells || cells.length < 7) {
-      showToast("Error: Invalid row data", "error");
-      return;
-    }
-
-    const orderNumber = parseInt(cells[1].textContent);
-    const title = cells[2].textContent;
-    const mediaType = cells[6].textContent.toLowerCase();
-
-    showLoading();
-    const mediaList = await fetchMedia(mediaType);
-    hideLoading();
-
-    if (!Array.isArray(mediaList)) {
-      showToast("Error: Failed to fetch media list", "error");
-      return;
-    }
-
-    let mediaItem = mediaList.find((item) => item.order_number === orderNumber);
-    if (!mediaItem && title) mediaItem = mediaList.find((item) => item.title === title);
-
-    if (!mediaItem) {
-      mediaItem = {
-        order_number: orderNumber,
-        title: cells[2].textContent,
-        genre: cells[3].textContent,
-        release_year: parseInt(cells[4].textContent.split("–")[0]) || new Date().getFullYear(),
-        rating: parseFloat(cells[5].textContent) || 0,
-        media_type: mediaType,
-      };
-      if (mediaType === "series") {
-        const parts = cells[4].textContent.split("–");
-        mediaItem.end_year = parts.length > 1 ? parseInt(parts[1]) : mediaItem.release_year;
-      }
-    }
-
-    editOrderInput.value = orderNumber;
-    editTitleInput.value = mediaItem.title || "";
-    editGenreInput.value = mediaItem.genre || "";
-    editReleaseYearInput.value = mediaItem.release_year || "";
-    editRatingInput.value = mediaItem.rating || "";
-    editMediaTypeInput.value = mediaType;
-
-    if (mediaType === "series") {
-      editEndYearGroup.style.display = "flex";
-      editEndYearInput.value = mediaItem.end_year || mediaItem.release_year || "";
-    } else {
-      editEndYearGroup.style.display = "none";
-    }
-
-    if (mediaItem.poster_url) {
-      editPosterImage.src = mediaItem.poster_url;
-      editPosterImage.style.display = "block";
-      editPosterPlaceholder.style.display = "none";
-    } else {
-      editPosterImage.style.display = "none";
-      editPosterPlaceholder.style.display = "flex";
-    }
-
-    editModal.style.display = "flex";
-    editModal.style.alignItems = "center";
-    editModal.style.justifyContent = "center";
-    document.body.style.overflow = "hidden";
-    document.addEventListener("keydown", handleEditEscape);
-  } catch (error) {
-    hideLoading();
-    showToast("Error editing item: " + error.message, "error");
-  }
-}
-
-function handleEditEscape(e) {
-  if (e.key === "Escape") closeModal();
-}
-
-function closeModal() {
-  editModal.style.display = "none";
-  document.body.style.overflow = "";
-  document.removeEventListener("keydown", handleEditEscape);
-}
-
-async function fetchEditInfo() {
-  const title = editTitleInput.value.trim();
-  if (!title) {
-    showToast("Please enter a title to search", "error");
-    return;
-  }
-
-  const mediaType = editMediaTypeInput.value;
-  showLoading();
-
-  try {
-    const info = mediaType === "movie" ? await searchMovieInfo(title) : await searchSeriesInfo(title);
-
-    hideLoading();
-    if (!info) {
-      showToast("No info found.", "info");
-      return;
-    }
-
-    editTitleInput.value = info.title;
-    editGenreInput.value = info.genre;
-    editReleaseYearInput.value = info.release_year;
-    editRatingInput.value = info.rating;
-
-    if (mediaType === "series" && info.end_year) editEndYearInput.value = info.end_year;
-
-    if (info.poster_url) {
-      editPosterImage.src = info.poster_url;
-      editPosterImage.style.display = "block";
-      editPosterPlaceholder.style.display = "none";
-    }
-
-    showToast(`Info loaded for "${info.title}"!`, "success");
-  } catch (error) {
-    hideLoading();
-    showToast("Error fetching info: " + error.message, "error");
-  }
-}
-
-async function saveChanges(e) {
-  e.preventDefault();
-
-  try {
-    const orderNumber = parseInt(editOrderInput.value);
-    const title = editTitleInput.value.trim();
-    const genre = editGenreInput.value.trim();
-    const mediaType = editMediaTypeInput.value;
-
-    if (!title || !genre) {
-      showToast("Please fill in all required fields", "error");
-      return;
-    }
-
-    const releaseYear = parseInt(editReleaseYearInput.value) || new Date().getFullYear();
-    const rating = parseFloat(editRatingInput.value) || 0;
-
-    if (rating < 0 || rating > 10) {
-      showToast("Rating must be between 0 and 10", "error");
-      return;
-    }
-
-    const updatedMedia = {
-      title,
-      genre,
-      release_year: releaseYear,
-      rating,
-      poster_url: editPosterImage.style.display === "block" ? editPosterImage.src : null,
-    };
-
-    if (mediaType === "series") {
-      const endYear = parseInt(editEndYearInput.value) || releaseYear;
-      if (endYear < releaseYear) {
-        showToast("End year must be ≥ release year", "error");
-        return;
-      }
-      updatedMedia.end_year = endYear;
-    }
-
-    showLoading();
-    const success = await updateMedia(mediaType, orderNumber, updatedMedia);
-    hideLoading();
-
-    if (success) {
-      showToast(`"${title}" updated successfully!`, "success");
-      closeModal();
-      await fetchAllMedia(true); // تحديث الكاش
-      await searchMedia();
-    } else {
-      showToast("Failed to update media", "error");
-    }
-  } catch (error) {
-    hideLoading();
-    showToast("Error updating media: " + error.message, "error");
-  }
-}
-
-// ════════════════════════════════════════════════
-//  DELETE (مُعدل لتحسين الاستجابة)
-// ════════════════════════════════════════════════
-
-async function deleteSelected() {
-  const checkboxes = document.querySelectorAll('tbody input[type="checkbox"]:checked');
-  if (checkboxes.length === 0) {
-    showToast("Please select at least one item to delete", "info");
-    return;
-  }
-  if (!confirm(`Delete ${checkboxes.length} item(s) from your vault?`)) return;
-
-  // تخزين معلومات العناصر المحذوفة للتراجع المحتمل
-  const deletedItems = [];
-  try {
-    let allSuccess = true;
-
-    // أولاً: إزالة العناصر من الواجهة فوراً (optimistic delete)
-    for (const cb of checkboxes) {
-      const row = cb.closest("tr");
-      const cells = row.cells;
-      const orderNum = parseInt(cells[1].textContent);
-      const mediaType = cells[6].textContent.toLowerCase();
-      deletedItems.push({ orderNum, mediaType, row });
-      row.remove(); // إزالة الصف
-    }
-
-    // تحديث الإحصائيات المؤقتة
-    const remainingRows = document.querySelectorAll("#results-body tr");
-    updateStatsFromRows(remainingRows);
-
-    // الآن تنفيذ الحذف الفعلي على الخادم
-    for (const item of deletedItems) {
-      const success = await deleteMedia(item.mediaType, item.orderNum);
-      if (!success) allSuccess = false;
-    }
-
-    if (allSuccess) {
-      showToast("Deleted from vault successfully!", "success");
-      // تحديث الكاش وإعادة التحميل لضمان المزامنة
-      await fetchAllMedia(true);
-      await searchMedia();
-    } else {
-      showToast("Some items could not be deleted", "error");
-      // إعادة تحميل كامل لاستعادة الحالة الصحيحة
-      await fetchAllMedia(true);
-      await searchMedia();
-    }
-  } catch (error) {
-    showToast("Error deleting: " + error.message, "error");
-    await fetchAllMedia(true);
-    await searchMedia();
-  }
-}
-
-// دالة مساعدة لتحديث الإحصائيات بناءً على الصفوف المتبقية
-function updateStatsFromRows(rows) {
-  const movies = Array.from(rows).filter(
-    (row) => row.cells[6].textContent.toLowerCase() === "movie"
-  ).length;
-  const series = rows.length - movies;
-  const avgEl = document.getElementById("stat-avg");
-  const topEl = document.getElementById("stat-top");
-  document.getElementById("stat-movies").textContent = movies;
-  document.getElementById("stat-series").textContent = series;
-  // يمكن إعادة حساب المتوسط إذا أردت، لكن الأفضل انتظار التحميل الكامل
-}
-
-// ════════════════════════════════════════════════
-//  UI HELPERS (بدون تغيير)
-// ════════════════════════════════════════════════
-
+// ════════════════════════════════════════════════════════
+//  Toast و Loading
+// ════════════════════════════════════════════════════════
 function showToast(message, type = "info") {
   toastMessage.textContent = message;
   toastIcon.className = "fas";
@@ -1108,14 +977,6 @@ function showToast(message, type = "info") {
   } else {
     toastIcon.classList.add("fa-info-circle", "info");
     toast.style.borderColor = "rgba(33,150,243,0.3)";
-  }
-
-  const prog = toast.querySelector(".toast-progress");
-  if (prog) {
-    prog.innerHTML = "";
-    void prog.offsetWidth;
-    prog.innerHTML = "";
-    prog.style.cssText = "";
   }
 
   toast.classList.add("show");
@@ -1142,7 +1003,55 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;");
 }
 
-// ════════════════════════════════════════════════
-//  BOOT
-// ════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+//  التهيئة
+// ════════════════════════════════════════════════════════
+async function init() {
+  // الثيم
+  if (localStorage.getItem("darkMode") === "false") {
+    document.body.classList.add("light-theme");
+    themeToggleBtn.querySelector("i").classList.replace("fa-moon", "fa-sun");
+  }
+
+  updateEndYearVisibility();
+
+  // التحميل الأولي
+  await searchMedia();
+
+  // مستمعو الأحداث
+  searchInput.addEventListener("input", debounce(filterLocalResults, 300));
+  searchBySelect.addEventListener("change", filterLocalResults);
+  filterTypeSelect.addEventListener("change", filterLocalResults);
+  searchBtn.addEventListener("click", () => searchMedia(true));
+
+  selectAllCheckbox && selectAllCheckbox.addEventListener("change", toggleSelectAll);
+  editBtn.addEventListener("click", editSelected);
+  deleteBtn.addEventListener("click", deleteSelected);
+  addForm.addEventListener("submit", addMedia);
+  mediaTypeSelect.addEventListener("change", updateEndYearVisibility);
+  autoFillBtn.addEventListener("click", fetchMediaInfo);
+  closeModalBtn && closeModalBtn.addEventListener("click", closeModal);
+  editForm.addEventListener("submit", saveChanges);
+  editAutoFillBtn.addEventListener("click", fetchEditInfo);
+  themeToggleBtn.addEventListener("click", toggleTheme);
+  document.getElementById("clear-form-btn").addEventListener("click", clearForm);
+
+  // إغلاق نافذة التفاصيل
+  const detClose = document.getElementById("det-close-btn");
+  if (detClose) detClose.addEventListener("click", closeDetailModal);
+  const detCloseCta = document.querySelector(".det-close-cta");
+  if (detCloseCta) detCloseCta.addEventListener("click", closeDetailModal);
+  const detOverlay = document.getElementById("detail-modal");
+  if (detOverlay) {
+    detOverlay.addEventListener("click", (e) => {
+      if (e.target === detOverlay) closeDetailModal();
+    });
+  }
+
+  // إغلاق نافذة التعديل عند النقر خارجها
+  window.addEventListener("click", (e) => {
+    if (e.target === editModal) closeModal();
+  });
+}
+
 document.addEventListener("DOMContentLoaded", init);
