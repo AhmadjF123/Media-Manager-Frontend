@@ -62,34 +62,48 @@ const themeToggleBtn    = document.getElementById("theme-toggle-btn")
 let currentResults  = []
 let currentGridMode = 'grid'
 
+// ── Cache layer (avoids redundant network calls) ──
+const _cache = { data: null, ts: 0, TTL: 60_000 }   // 60s cache
+function _cacheGet()          { return (Date.now() - _cache.ts < _cache.TTL) ? _cache.data : null }
+function _cacheSet(data)      { _cache.data = data; _cache.ts = Date.now() }
+function _cacheInvalidate()   { _cache.ts = 0 }
+
 // ════════════════════════════════════════════════
 //  API FUNCTIONS
 // ════════════════════════════════════════════════
 
-async function fetchMedia(mediaType) {
+// ── Fetch ALL media in one request (with cache) ──
+async function fetchAllMedia() {
+  const cached = _cacheGet()
+  if (cached) return cached
+
   try {
     showLoading()
-    const response = await fetch(`${API_BASE_URL}?type=${mediaType}`)
+    const response = await fetch(`${API_BASE_URL}/all?type=all`)
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
-    const text = await response.text()
-    let data
-    try { data = JSON.parse(text) } catch(e) {
-      throw new Error(`Invalid JSON response: ${text.substring(0,100)}...`)
-    }
+    const data = await response.json()
     hideLoading()
     if (!Array.isArray(data)) return []
-    return data.map(item => ({
+    const normalised = data.map(item => ({
       ...item,
       order_number: parseInt(item.order_number) || 0,
       release_year: parseInt(item.release_year) || 0,
-      end_year:     parseInt(item.end_year) || 0,
-      rating:       parseFloat(item.rating) || 0,
+      end_year:     parseInt(item.end_year)     || 0,
+      rating:       parseFloat(item.rating)     || 0,
     }))
+    _cacheSet(normalised)
+    return normalised
   } catch(error) {
     hideLoading()
-    showToast(`Error fetching ${mediaType}: ${error.message}`, "error")
+    showToast(`Error fetching media: ${error.message}`, "error")
     return []
   }
+}
+
+// ── Legacy helper (used in edit/duplicate checks — uses cache) ──
+async function fetchMedia(mediaType) {
+  const all = await fetchAllMedia()
+  return all.filter(item => item.media_type === mediaType)
 }
 
 async function saveMedia(mediaType, mediaData) {
@@ -102,6 +116,7 @@ async function saveMedia(mediaType, mediaData) {
     })
     const result = await response.json()
     hideLoading()
+    _cacheInvalidate()   // ← force fresh fetch next time
     return result.success
   } catch(error) {
     hideLoading()
@@ -125,6 +140,7 @@ async function updateMedia(mediaType, orderNumber, mediaData) {
       throw new Error(`Invalid JSON: ${text.substring(0,100)}...`)
     }
     hideLoading()
+    _cacheInvalidate()   // ← force fresh fetch next time
     if (result.error) throw new Error(result.error)
     return result.success === true
   } catch(error) {
@@ -144,6 +160,7 @@ async function deleteMedia(mediaType, orderNumber) {
     })
     const result = await response.json()
     hideLoading()
+    _cacheInvalidate()   // ← force fresh fetch next time
     return result.success
   } catch(error) {
     hideLoading()
@@ -252,66 +269,42 @@ window.toggleRowSelection = toggleRowSelection
 // ════════════════════════════════════════════════
 
 async function searchMedia() {
-  const searchQuery = searchInput.value.toLowerCase()
+  const searchQuery = searchInput.value.trim().toLowerCase()
   const searchBy    = searchBySelect.value
   const filterType  = filterTypeSelect.value
-  let results = []
 
   try {
-    if (filterType === "all" || filterType === "movie") {
-      const movies = await fetchMedia("movie")
-      if (Array.isArray(movies)) {
-        const filtered = movies.filter(movie => {
-          if (!movie) return false
-          if (!searchQuery) return true
-          if (searchBy === "title")        return movie.title?.toLowerCase().includes(searchQuery)
-          if (searchBy === "release_year") return movie.release_year?.toString() === searchQuery
-          if (searchBy === "genre")        return movie.genre?.toLowerCase().includes(searchQuery)
-          if (searchBy === "rating") {
-            const r = parseFloat(searchQuery)
-            return !isNaN(r) && parseFloat(movie.rating) === r
-          }
-          return true
-        })
-        results = [...results, ...filtered.map(movie => ({
-          ...movie,
-          media_type:   "movie",
-          display_year: movie.release_year?.toString() || "",
-          rating:       parseFloat(movie.rating) || 0,
-        }))]
-      }
-    }
+    const all = await fetchAllMedia()
 
-    if (filterType === "all" || filterType === "series") {
-      const series = await fetchMedia("series")
-      if (Array.isArray(series)) {
-        const filtered = series.filter(serie => {
-          if (!serie) return false
-          if (!searchQuery) return true
-          if (searchBy === "title")        return serie.title?.toLowerCase().includes(searchQuery)
-          if (searchBy === "release_year") {
-            const y = parseInt(searchQuery)
-            return !isNaN(y) && (serie.release_year === y || serie.end_year === y)
-          }
-          if (searchBy === "genre")        return serie.genre?.toLowerCase().includes(searchQuery)
-          if (searchBy === "rating") {
-            const r = parseFloat(searchQuery)
-            return !isNaN(r) && parseFloat(serie.rating) === r
-          }
-          return true
-        })
-        results = [...results, ...filtered.map(serie => ({
-          ...serie,
-          media_type: "series",
-          display_year: serie.release_year === serie.end_year
-            ? serie.release_year?.toString() || ""
-            : `${serie.release_year || ""}–${serie.end_year || ""}`,
-          rating: parseFloat(serie.rating) || 0,
-        }))]
+    let results = all.filter(item => {
+      // Type filter
+      if (filterType !== "all" && item.media_type !== filterType) return false
+      // Search filter
+      if (!searchQuery) return true
+      if (searchBy === "title")        return item.title?.toLowerCase().includes(searchQuery)
+      if (searchBy === "genre")        return item.genre?.toLowerCase().includes(searchQuery)
+      if (searchBy === "release_year") {
+        const y = parseInt(searchQuery)
+        return !isNaN(y) && (item.release_year === y || item.end_year === y)
       }
-    }
+      if (searchBy === "rating") {
+        const r = parseFloat(searchQuery)
+        return !isNaN(r) && parseFloat(item.rating) === r
+      }
+      return true
+    })
 
-    results.sort((a,b) => (a.order_number||0)-(b.order_number||0))
+    results = results
+      .map(item => ({
+        ...item,
+        display_year: item.media_type === "movie"
+          ? item.release_year?.toString() || ""
+          : item.release_year === item.end_year
+            ? item.release_year?.toString() || ""
+            : `${item.release_year || ""}–${item.end_year || ""}`,
+      }))
+      .sort((a, b) => (a.order_number || 0) - (b.order_number || 0))
+
     updateResultsTable(results)
 
   } catch(error) {
