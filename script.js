@@ -56,7 +56,7 @@ const toast             = document.getElementById("toast")
 const toastMessage      = document.getElementById("toast-message")
 const toastIcon         = document.getElementById("toast-icon")
 const loadingSpinner    = document.getElementById("loading-spinner")
-const themeToggleBtn    = document.getElementById("theme-toggle-btn")
+const themeCheckbox     = document.getElementById("theme-checkbox")   // new switch
 
 // ── Global state ──
 let currentResults  = []
@@ -177,8 +177,11 @@ async function init() {
   // Theme
   if (localStorage.getItem("darkMode") === "false") {
     document.body.classList.add("light-theme")
-    themeToggleBtn.querySelector('i').classList.replace("fa-moon","fa-sun")
+    themeCheckbox.checked = true
+  } else {
+    themeCheckbox.checked = false
   }
+  themeCheckbox.addEventListener("change", toggleTheme)
 
   updateEndYearVisibility()
   await searchMedia()
@@ -195,7 +198,6 @@ async function init() {
   closeModalBtn && closeModalBtn.addEventListener("click", closeModal)
   editForm.addEventListener("submit", saveChanges)
   editAutoFillBtn.addEventListener("click", fetchEditInfo)
-  themeToggleBtn.addEventListener("click", toggleTheme)
 
   document.getElementById("clear-form-btn").addEventListener("click", clearForm)
 
@@ -219,15 +221,14 @@ async function init() {
   })
 }
 
-function toggleTheme() {
-  document.body.classList.toggle("light-theme")
-  const isLight = document.body.classList.contains("light-theme")
-  localStorage.setItem("darkMode", isLight ? "false" : "true")
-  const icon = themeToggleBtn.querySelector('i')
-  if (isLight) {
-    icon.classList.replace("fa-moon","fa-sun")
+function toggleTheme(e) {
+  const isChecked = e.target.checked
+  if (isChecked) {
+    document.body.classList.add("light-theme")
+    localStorage.setItem("darkMode", "false")
   } else {
-    icon.classList.replace("fa-sun","fa-moon")
+    document.body.classList.remove("light-theme")
+    localStorage.setItem("darkMode", "true")
   }
 }
 
