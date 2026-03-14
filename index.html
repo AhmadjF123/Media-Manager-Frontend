@@ -1,454 +1,612 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Cinéma — Media Vault</title>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cinéma — Media Vault</title>
 
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.3/css/all.min.css"
+    />
 
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- Ambient orbs -->
+    <div class="ambient">
+      <div class="orb o1"></div>
+      <div class="orb o2"></div>
+      <div class="orb o3"></div>
+    </div>
 
+    <!-- Film grain overlay -->
+    <div class="grain"></div>
 
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-
-  <!-- Ambient orbs -->
-  <div class="ambient">
-    <div class="orb o1"></div>
-    <div class="orb o2"></div>
-    <div class="orb o3"></div>
-  </div>
-
-  <!-- Film grain overlay -->
-  <div class="grain"></div>
-
-  <div class="app">
-
-    <!-- ═══════════ HEADER ═══════════ -->
-    <header class="hdr">
-      <div class="hdr-brand">
-        <div class="brand-reel"><i class="fas fa-film"></i></div>
-        <div>
-          <div class="brand-name">Cinéma</div>
-          <div class="brand-sub">Media Vault</div>
-        </div>
-      </div>
-
-      <nav class="hdr-nav">
-        <button class="nav-pill active" id="nav-collection" onclick="switchView('collection')">
-          <i class="fas fa-layer-group"></i><span>Collection</span>
-        </button>
-        <button class="nav-pill" id="nav-add" onclick="switchView('add')">
-          <i class="fas fa-plus"></i><span>Add New</span>
-        </button>
-      </nav>
-
-      <!-- Auth Button -->
-      <div class="auth-area" id="auth-area">
-        <!-- Guest state -->
-        <button class="auth-btn guest-btn" id="auth-open-btn" onclick="openAuthModal('login')">
-          <i class="fas fa-user-circle"></i>
-          <span>Sign In</span>
-        </button>
-        <!-- Logged-in state (hidden by default) -->
-        <div class="user-pill" id="user-pill" style="display:none;">
-          <div class="user-avatar" id="user-avatar">U</div>
-          <span class="user-name" id="user-name-label"></span>
-          <button class="logout-btn" id="logout-btn" onclick="logout()" title="Sign Out">
-            <i class="fas fa-sign-out-alt"></i>
-          </button>
-        </div>
-      </div>
-
-      <!-- Theme toggle switch (replaces old icon button) -->
-      <label class="switch" for="theme-checkbox">
-        <input type="checkbox" id="theme-checkbox" />
-        <span class="slider">
-          <div class="star star_1"></div>
-          <div class="star star_2"></div>
-          <div class="star star_3"></div>
-          <svg viewBox="0 0 16 16" class="cloud_1 cloud">
-            <path transform="matrix(.77976 0 0 .78395-299.99-418.63)" fill="#fff" d="m391.84 540.91c-.421-.329-.949-.524-1.523-.524-1.351 0-2.451 1.084-2.485 2.435-1.395.526-2.388 1.88-2.388 3.466 0 1.874 1.385 3.423 3.182 3.667v.034h12.73v-.006c1.775-.104 3.182-1.584 3.182-3.395 0-1.747-1.309-3.186-2.994-3.379.007-.106.011-.214.011-.322 0-2.707-2.271-4.901-5.072-4.901-2.073 0-3.856 1.202-4.643 2.925"></path>
-          </svg>
-        </span>
-      </label>
-    </header>
-
-    <!-- ═══════════ COLLECTION VIEW ═══════════ -->
-    <section class="view" id="view-collection">
-
-      <!-- Guest banner -->
-      <div id="guest-banner" class="guest-banner" style="display:none;">
-        <div class="guest-banner-inner">
-          <i class="fas fa-lock"></i>
+    <div class="app">
+      <!-- ═══════════ HEADER ═══════════ -->
+      <header class="hdr">
+        <div class="hdr-brand">
+          <div class="brand-reel"><i class="fas fa-film"></i></div>
           <div>
-            <strong>You're browsing as a guest</strong>
-            <span>Sign in to manage your personal vault — add, edit & track your collection.</span>
+            <div class="brand-name">Cinéma</div>
+            <div class="brand-sub">Media Vault</div>
           </div>
-          <button class="gold-btn" onclick="openAuthModal('login')">
-            <i class="fas fa-user-circle"></i> Sign In
+        </div>
+
+        <nav class="hdr-nav">
+          <button
+            class="nav-pill active"
+            id="nav-collection"
+            onclick="switchView('collection')"
+          >
+            <i class="fas fa-layer-group"></i><span>Collection</span>
+          </button>
+          <button class="nav-pill" id="nav-add" onclick="switchView('add')">
+            <i class="fas fa-plus"></i><span>Add New</span>
+          </button>
+        </nav>
+
+        <!-- Auth Button -->
+        <div class="auth-area" id="auth-area">
+          <!-- Guest state -->
+          <button
+            class="auth-btn guest-btn"
+            id="auth-open-btn"
+            onclick="openAuthModal('login')"
+          >
+            <i class="fas fa-user-circle"></i>
+            <span>Sign In</span>
+          </button>
+          <!-- Logged-in state (hidden by default) -->
+          <div class="user-pill" id="user-pill" style="display: none">
+            <div class="user-avatar" id="user-avatar">U</div>
+            <span class="user-name" id="user-name-label"></span>
+            <button
+              class="logout-btn"
+              id="logout-btn"
+              onclick="logout()"
+              title="Sign Out"
+            >
+              <i class="fas fa-sign-out-alt"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Theme toggle switch (replaces old icon button) -->
+        <label class="switch" for="theme-checkbox">
+          <input type="checkbox" id="theme-checkbox" />
+          <span class="slider">
+            <div class="star star_1"></div>
+            <div class="star star_2"></div>
+            <div class="star star_3"></div>
+            <svg viewBox="0 0 16 16" class="cloud_1 cloud">
+              <path
+                transform="matrix(.77976 0 0 .78395-299.99-418.63)"
+                fill="#fff"
+                d="m391.84 540.91c-.421-.329-.949-.524-1.523-.524-1.351 0-2.451 1.084-2.485 2.435-1.395.526-2.388 1.88-2.388 3.466 0 1.874 1.385 3.423 3.182 3.667v.034h12.73v-.006c1.775-.104 3.182-1.584 3.182-3.395 0-1.747-1.309-3.186-2.994-3.379.007-.106.011-.214.011-.322 0-2.707-2.271-4.901-5.072-4.901-2.073 0-3.856 1.202-4.643 2.925"
+              ></path>
+            </svg>
+          </span>
+        </label>
+      </header>
+
+      <!-- ═══════════ COLLECTION VIEW ═══════════ -->
+      <section class="view" id="view-collection">
+        <!-- Guest banner -->
+        <div id="guest-banner" class="guest-banner" style="display: none">
+          <div class="guest-banner-inner">
+            <i class="fas fa-lock"></i>
+            <div>
+              <strong>You're browsing as a guest</strong>
+              <span
+                >Sign in to manage your personal vault — add, edit & track your
+                collection.</span
+              >
+            </div>
+            <button class="gold-btn" onclick="openAuthModal('login')">
+              <i class="fas fa-user-circle"></i> Sign In
+            </button>
+          </div>
+        </div>
+
+        <!-- Stats ribbon -->
+        <div class="stats-ribbon">
+          <div class="stat-block">
+            <span class="stat-n" id="stat-movies">0</span>
+            <span class="stat-l">Movies</span>
+          </div>
+          <div class="stat-sep"></div>
+          <div class="stat-block">
+            <span class="stat-n" id="stat-series">0</span>
+            <span class="stat-l">Series</span>
+          </div>
+          <div class="stat-sep"></div>
+          <div class="stat-block">
+            <span class="stat-n" id="stat-avg">—</span>
+            <span class="stat-l">Avg Rating</span>
+          </div>
+          <div class="stat-sep"></div>
+          <div class="stat-block stat-top-block">
+            <span class="stat-n stat-top-title" id="stat-top">—</span>
+            <span class="stat-l">Top Rated</span>
+          </div>
+        </div>
+
+        <!-- Search -->
+        <div class="search-wrap">
+          <div class="search-box">
+            <i class="fas fa-search search-ico"></i>
+            <input
+              type="text"
+              id="search-input"
+              class="search-inp"
+              placeholder="Search your vault…"
+            />
+            <select id="search-by" class="sel-chip">
+              <option value="title">Title</option>
+              <option value="release_year">Year</option>
+              <option value="genre">Genre</option>
+              <option value="rating">Rating</option>
+            </select>
+            <select id="filter-type" class="sel-chip">
+              <option value="all">All</option>
+              <option value="movie">Movies</option>
+              <option value="series">Series</option>
+            </select>
+            <button id="search-btn" class="search-go">
+              <i class="fas fa-arrow-right"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+          <div class="view-switcher">
+            <button
+              class="vs-btn active"
+              id="grid-toggle-btn"
+              onclick="toggleGridView('grid')"
+              title="Grid view"
+            >
+              <i class="fas fa-th-large"></i>
+            </button>
+            <button
+              class="vs-btn"
+              id="list-toggle-btn"
+              onclick="toggleGridView('list')"
+              title="List view"
+            >
+              <i class="fas fa-list"></i>
+            </button>
+          </div>
+          <div id="status-label" class="status-txt">Loading…</div>
+          <div class="tbl-actions">
+            <button id="edit-btn" class="act-btn">
+              <i class="fas fa-pen"></i> Edit
+            </button>
+            <button id="delete-btn" class="act-btn danger">
+              <i class="fas fa-trash"></i> Delete
+            </button>
+          </div>
+        </div>
+
+        <!-- Card Grid -->
+        <div id="card-grid" class="card-grid"></div>
+
+        <!-- Table View -->
+        <div id="table-view" class="tbl-wrap" style="display: none">
+          <table id="results-table">
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="select-all" class="chk" /></th>
+                <th>#</th>
+                <th>Title</th>
+                <th>Genre</th>
+                <th>Year</th>
+                <th>Rating</th>
+                <th>Type</th>
+              </tr>
+            </thead>
+            <tbody id="results-body"></tbody>
+          </table>
+        </div>
+
+        <!-- Empty state -->
+        <div id="empty-state" class="empty-state" style="display: none">
+          <div class="empty-reel"><i class="fas fa-film"></i></div>
+          <h3>Your vault is empty</h3>
+          <p>Add your first movie or series to get started.</p>
+          <button class="gold-btn" onclick="switchView('add')">
+            <i class="fas fa-plus"></i> Add Something
           </button>
         </div>
-      </div>
+      </section>
 
-      <!-- Stats ribbon -->
-      <div class="stats-ribbon">
-        <div class="stat-block">
-          <span class="stat-n" id="stat-movies">0</span>
-          <span class="stat-l">Movies</span>
-        </div>
-        <div class="stat-sep"></div>
-        <div class="stat-block">
-          <span class="stat-n" id="stat-series">0</span>
-          <span class="stat-l">Series</span>
-        </div>
-        <div class="stat-sep"></div>
-        <div class="stat-block">
-          <span class="stat-n" id="stat-avg">—</span>
-          <span class="stat-l">Avg Rating</span>
-        </div>
-        <div class="stat-sep"></div>
-        <div class="stat-block stat-top-block">
-          <span class="stat-n stat-top-title" id="stat-top">—</span>
-          <span class="stat-l">Top Rated</span>
-        </div>
-      </div>
+      <!-- ═══════════ ADD VIEW ═══════════ -->
+      <section class="view" id="view-add" style="display: none">
+        <div class="add-wrap">
+          <div class="add-form-panel">
+            <div class="panel-hdr">
+              <h2 class="panel-title">Add to Collection</h2>
+              <p class="panel-sub">
+                Fill in the details or use Auto-Fill magic
+              </p>
+            </div>
 
-      <!-- Search -->
-      <div class="search-wrap">
-        <div class="search-box">
-          <i class="fas fa-search search-ico"></i>
-          <input type="text" id="search-input" class="search-inp" placeholder="Search your vault…">
-          <select id="search-by" class="sel-chip">
-            <option value="title">Title</option>
-            <option value="release_year">Year</option>
-            <option value="genre">Genre</option>
-            <option value="rating">Rating</option>
-          </select>
-          <select id="filter-type" class="sel-chip">
-            <option value="all">All</option>
-            <option value="movie">Movies</option>
-            <option value="series">Series</option>
-          </select>
-          <button id="search-btn" class="search-go">
-            <i class="fas fa-arrow-right"></i>
-          </button>
+            <form id="add-form" class="a-form">
+              <div class="frow">
+                <div class="fgrp">
+                  <label for="title">Title</label>
+                  <input
+                    type="text"
+                    id="title"
+                    placeholder="e.g. Oppenheimer"
+                    required
+                  />
+                </div>
+                <div class="fgrp fgrp-sm">
+                  <label for="media-type">Type</label>
+                  <select id="media-type" class="f-select">
+                    <option value="movie">🎬 Movie</option>
+                    <option value="series">📺 Series</option>
+                  </select>
+                </div>
+              </div>
+              <div class="frow">
+                <div class="fgrp">
+                  <label for="genre">Genre</label>
+                  <input
+                    type="text"
+                    id="genre"
+                    placeholder="Drama, Thriller…"
+                    required
+                  />
+                </div>
+                <div class="fgrp fgrp-sm">
+                  <label for="rating">Rating</label>
+                  <input
+                    type="number"
+                    id="rating"
+                    step="0.1"
+                    min="0"
+                    max="10"
+                    placeholder="8.5"
+                    required
+                  />
+                </div>
+              </div>
+              <div class="frow">
+                <div class="fgrp">
+                  <label for="release-year">Release Year</label>
+                  <input
+                    type="number"
+                    id="release-year"
+                    placeholder="2024"
+                    required
+                  />
+                </div>
+                <div class="fgrp" id="end-year-group" style="display: none">
+                  <label for="end-year">End Year</label>
+                  <input type="number" id="end-year" placeholder="2026" />
+                </div>
+              </div>
+              <div class="form-footer-row">
+                <button type="button" id="auto-fill-btn" class="btn-magic">
+                  <i class="fas fa-magic"></i> Auto-Fill
+                </button>
+                <button type="button" id="clear-form-btn" class="btn-ghost">
+                  <i class="fas fa-eraser"></i> Clear
+                </button>
+                <button type="submit" class="btn-gold">
+                  <i class="fas fa-plus"></i> Add to Vault
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div class="add-poster-panel">
+            <div id="poster-placeholder" class="poster-ph">
+              <div class="poster-ph-inner">
+                <i class="fas fa-photo-film"></i>
+                <p>Poster Preview</p>
+                <span>Auto-Fill will load the poster</span>
+              </div>
+            </div>
+            <img
+              id="poster-image"
+              src=""
+              alt="Poster"
+              class="poster-img"
+              style="display: none"
+            />
+          </div>
         </div>
-      </div>
+      </section>
+    </div>
+    <!-- /app -->
 
-      <!-- Toolbar -->
-      <div class="toolbar">
-        <div class="view-switcher">
-          <button class="vs-btn active" id="grid-toggle-btn" onclick="toggleGridView('grid')" title="Grid view">
-            <i class="fas fa-th-large"></i>
-          </button>
-          <button class="vs-btn" id="list-toggle-btn" onclick="toggleGridView('list')" title="List view">
-            <i class="fas fa-list"></i>
-          </button>
-        </div>
-        <div id="status-label" class="status-txt">Loading…</div>
-        <div class="tbl-actions">
-          <button id="edit-btn" class="act-btn">
-            <i class="fas fa-pen"></i> Edit
-          </button>
-          <button id="delete-btn" class="act-btn danger">
-            <i class="fas fa-trash"></i> Delete
-          </button>
-        </div>
-      </div>
-
-      <!-- Card Grid -->
-      <div id="card-grid" class="card-grid"></div>
-
-      <!-- Table View -->
-      <div id="table-view" class="tbl-wrap" style="display:none;">
-        <table id="results-table">
-          <thead>
-            <tr>
-              <th><input type="checkbox" id="select-all" class="chk"></th>
-              <th>#</th>
-              <th>Title</th>
-              <th>Genre</th>
-              <th>Year</th>
-              <th>Rating</th>
-              <th>Type</th>
-            </tr>
-          </thead>
-          <tbody id="results-body"></tbody>
-        </table>
-      </div>
-
-      <!-- Empty state -->
-      <div id="empty-state" class="empty-state" style="display:none;">
-        <div class="empty-reel"><i class="fas fa-film"></i></div>
-        <h3>Your vault is empty</h3>
-        <p>Add your first movie or series to get started.</p>
-        <button class="gold-btn" onclick="switchView('add')">
-          <i class="fas fa-plus"></i> Add Something
+    <!-- ═══════════ DETAIL MODAL ═══════════ -->
+    <div id="detail-modal" class="det-overlay">
+      <div class="det-box">
+        <button class="det-close" id="det-close-btn">
+          <i class="fas fa-times"></i>
         </button>
-      </div>
 
-    </section>
+        <div class="det-bg-blur" id="detail-bg-blur"></div>
 
-    <!-- ═══════════ ADD VIEW ═══════════ -->
-    <section class="view" id="view-add" style="display:none;">
-      <div class="add-wrap">
-
-        <div class="add-form-panel">
-          <div class="panel-hdr">
-            <h2 class="panel-title">Add to Collection</h2>
-            <p class="panel-sub">Fill in the details or use Auto-Fill magic</p>
+        <div class="det-content">
+          <div class="det-poster-col">
+            <div id="detail-poster-ph" class="det-poster-ph">
+              <i class="fas fa-film"></i>
+            </div>
+            <img
+              id="detail-poster"
+              src=""
+              alt=""
+              class="det-poster-img"
+              style="display: none"
+            />
           </div>
 
-          <form id="add-form" class="a-form">
+          <div class="det-info-col">
+            <div class="det-type-badge" id="detail-type"></div>
+            <h1 class="det-title" id="detail-title"></h1>
+            <div class="det-meta" id="detail-meta"></div>
+
+            <div class="det-rating-row" id="detail-rating-display"></div>
+
+            <div class="det-genres" id="detail-genre-tags"></div>
+
+            <!-- Extra: overview, cast, trailer (filled async) -->
+            <div id="detail-extra" class="det-extra"></div>
+
+            <div class="det-cta">
+              <button class="btn-gold" id="detail-edit-btn">
+                <i class="fas fa-pen"></i> Edit Title
+              </button>
+              <button class="btn-ghost det-close-cta">
+                <i class="fas fa-times"></i> Close
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════ EDIT MODAL ═══════════ -->
+    <div id="edit-modal" class="edit-overlay">
+      <div class="edit-box">
+        <div class="edit-hdr">
+          <h2>Edit Title</h2>
+          <button class="close edit-x"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="edit-body">
+          <form id="edit-form" class="a-form">
+            <input type="hidden" id="edit-id" />
+            <input type="hidden" id="edit-order" />
             <div class="frow">
               <div class="fgrp">
-                <label for="title">Title</label>
-                <input type="text" id="title" placeholder="e.g. Oppenheimer" required>
+                <label for="edit-title">Title</label>
+                <input type="text" id="edit-title" required />
               </div>
-              <div class="fgrp fgrp-sm">
-                <label for="media-type">Type</label>
-                <select id="media-type" class="f-select">
-                  <option value="movie">🎬 Movie</option>
-                  <option value="series">📺 Series</option>
-                </select>
+              <div class="fgrp">
+                <label for="edit-genre">Genre</label>
+                <input type="text" id="edit-genre" required />
               </div>
             </div>
             <div class="frow">
               <div class="fgrp">
-                <label for="genre">Genre</label>
-                <input type="text" id="genre" placeholder="Drama, Thriller…" required>
+                <label for="edit-release-year">Release Year</label>
+                <input type="number" id="edit-release-year" required />
               </div>
-              <div class="fgrp fgrp-sm">
-                <label for="rating">Rating</label>
-                <input type="number" id="rating" step="0.1" min="0" max="10" placeholder="8.5" required>
+              <div class="fgrp" id="edit-end-year-group">
+                <label for="edit-end-year">End Year</label>
+                <input type="number" id="edit-end-year" />
               </div>
             </div>
             <div class="frow">
               <div class="fgrp">
-                <label for="release-year">Release Year</label>
-                <input type="number" id="release-year" placeholder="2024" required>
+                <label for="edit-rating">Rating</label>
+                <input
+                  type="number"
+                  id="edit-rating"
+                  step="0.1"
+                  min="0"
+                  max="10"
+                  required
+                />
               </div>
-              <div class="fgrp" id="end-year-group" style="display:none;">
-                <label for="end-year">End Year</label>
-                <input type="number" id="end-year" placeholder="2026">
+              <div class="fgrp">
+                <label for="edit-media-type">Type</label>
+                <input
+                  type="text"
+                  id="edit-media-type"
+                  readonly
+                  class="readonly-inp"
+                />
               </div>
             </div>
             <div class="form-footer-row">
-              <button type="button" id="auto-fill-btn" class="btn-magic">
+              <button type="button" id="edit-auto-fill-btn" class="btn-magic">
                 <i class="fas fa-magic"></i> Auto-Fill
               </button>
-              <button type="button" id="clear-form-btn" class="btn-ghost">
-                <i class="fas fa-eraser"></i> Clear
-              </button>
               <button type="submit" class="btn-gold">
-                <i class="fas fa-plus"></i> Add to Vault
+                <i class="fas fa-save"></i> Save Changes
               </button>
             </div>
           </form>
-        </div>
 
-        <div class="add-poster-panel">
-          <div id="poster-placeholder" class="poster-ph">
-            <div class="poster-ph-inner">
-              <i class="fas fa-photo-film"></i>
-              <p>Poster Preview</p>
-              <span>Auto-Fill will load the poster</span>
+          <div class="edit-poster-col">
+            <div id="edit-poster-placeholder" class="poster-ph">
+              <div class="poster-ph-inner">
+                <i class="fas fa-photo-film"></i>
+                <p>Poster Preview</p>
+              </div>
             </div>
-          </div>
-          <img id="poster-image" src="" alt="Poster" class="poster-img" style="display:none;">
-        </div>
-
-      </div>
-    </section>
-
-  </div><!-- /app -->
-
-
-  <!-- ═══════════ DETAIL MODAL ═══════════ -->
-  <div id="detail-modal" class="det-overlay">
-    <div class="det-box">
-      <button class="det-close" id="det-close-btn"><i class="fas fa-times"></i></button>
-
-      <div class="det-bg-blur" id="detail-bg-blur"></div>
-
-      <div class="det-content">
-        <div class="det-poster-col">
-          <div id="detail-poster-ph" class="det-poster-ph"><i class="fas fa-film"></i></div>
-          <img id="detail-poster" src="" alt="" class="det-poster-img" style="display:none;">
-        </div>
-
-        <div class="det-info-col">
-          <div class="det-type-badge" id="detail-type"></div>
-          <h1 class="det-title" id="detail-title"></h1>
-          <div class="det-meta" id="detail-meta"></div>
-
-          <div class="det-rating-row" id="detail-rating-display"></div>
-
-          <div class="det-genres" id="detail-genre-tags"></div>
-
-          <div class="det-cta">
-            <button class="btn-gold" id="detail-edit-btn">
-              <i class="fas fa-pen"></i> Edit Title
-            </button>
-            <button class="btn-ghost det-close-cta">
-              <i class="fas fa-times"></i> Close
-            </button>
+            <img
+              id="edit-poster-image"
+              src=""
+              alt="Poster"
+              class="poster-img"
+              style="display: none"
+            />
           </div>
         </div>
       </div>
     </div>
-  </div>
 
+    <!-- ═══════════ AUTH MODAL ═══════════ -->
+    <div id="auth-modal" class="auth-overlay" style="display:none">
+      <div class="auth-box">
 
-  <!-- ═══════════ EDIT MODAL ═══════════ -->
-  <div id="edit-modal" class="edit-overlay">
-    <div class="edit-box">
-      <div class="edit-hdr">
-        <h2>Edit Title</h2>
-        <button class="close edit-x"><i class="fas fa-times"></i></button>
-      </div>
-      <div class="edit-body">
-        <form id="edit-form" class="a-form">
-          <input type="hidden" id="edit-id">
-          <input type="hidden" id="edit-order">
-          <div class="frow">
-            <div class="fgrp">
-              <label for="edit-title">Title</label>
-              <input type="text" id="edit-title" required>
-            </div>
-            <div class="fgrp">
-              <label for="edit-genre">Genre</label>
-              <input type="text" id="edit-genre" required>
-            </div>
-          </div>
-          <div class="frow">
-            <div class="fgrp">
-              <label for="edit-release-year">Release Year</label>
-              <input type="number" id="edit-release-year" required>
-            </div>
-            <div class="fgrp" id="edit-end-year-group">
-              <label for="edit-end-year">End Year</label>
-              <input type="number" id="edit-end-year">
-            </div>
-          </div>
-          <div class="frow">
-            <div class="fgrp">
-              <label for="edit-rating">Rating</label>
-              <input type="number" id="edit-rating" step="0.1" min="0" max="10" required>
-            </div>
-            <div class="fgrp">
-              <label for="edit-media-type">Type</label>
-              <input type="text" id="edit-media-type" readonly class="readonly-inp">
-            </div>
-          </div>
-          <div class="form-footer-row">
-            <button type="button" id="edit-auto-fill-btn" class="btn-magic">
-              <i class="fas fa-magic"></i> Auto-Fill
-            </button>
-            <button type="submit" class="btn-gold">
-              <i class="fas fa-save"></i> Save Changes
-            </button>
-          </div>
-        </form>
-
-        <div class="edit-poster-col">
-          <div id="edit-poster-placeholder" class="poster-ph">
-            <div class="poster-ph-inner">
-              <i class="fas fa-photo-film"></i>
-              <p>Poster Preview</p>
-            </div>
-          </div>
-          <img id="edit-poster-image" src="" alt="Poster" class="poster-img" style="display:none;">
+        <!-- Decorative background reels -->
+        <div class="auth-deco">
+          <div class="auth-deco-reel r1"><i class="fas fa-film"></i></div>
+          <div class="auth-deco-reel r2"><i class="fas fa-film"></i></div>
+          <div class="auth-deco-circle c1"></div>
+          <div class="auth-deco-circle c2"></div>
         </div>
-      </div>
-    </div>
-  </div>
 
-
-  <!-- ═══════════ AUTH MODAL ═══════════ -->
-  <div id="auth-modal" class="auth-overlay" style="display:none;">
-    <div class="auth-box">
-      <button class="auth-modal-close" onclick="closeAuthModal()"><i class="fas fa-times"></i></button>
-
-      <div class="auth-brand">
-        <div class="brand-reel small"><i class="fas fa-film"></i></div>
-        <div class="auth-brand-text">Cinéma <span>Vault</span></div>
-      </div>
-
-      <!-- Tabs -->
-      <div class="auth-tabs">
-        <button class="auth-tab active" id="tab-login"    onclick="switchAuthTab('login')">Sign In</button>
-        <button class="auth-tab"        id="tab-register" onclick="switchAuthTab('register')">Create Account</button>
-      </div>
-
-      <!-- Login Form -->
-      <div id="auth-login-form" class="auth-form-wrap">
-        <div class="fgrp">
-          <label for="auth-email">Email</label>
-          <input type="email" id="auth-email" class="auth-inp" placeholder="you@example.com" autocomplete="email">
-        </div>
-        <div class="fgrp">
-          <label for="auth-password">Password</label>
-          <div class="auth-pw-wrap">
-            <input type="password" id="auth-password" class="auth-inp" placeholder="••••••••" autocomplete="current-password">
-            <button type="button" class="pw-eye" onclick="togglePwVisibility('auth-password', this)">
-              <i class="fas fa-eye"></i>
-            </button>
-          </div>
-        </div>
-        <div id="auth-login-error" class="auth-error" style="display:none;"></div>
-        <button class="btn-gold auth-submit" id="login-submit-btn" onclick="submitLogin()">
-          <i class="fas fa-sign-in-alt"></i> Sign In
+        <!-- Close -->
+        <button class="auth-modal-close" onclick="closeAuthModal()">
+          <i class="fas fa-times"></i>
         </button>
-        <p class="auth-switch-hint">Don't have an account? <a href="#" onclick="switchAuthTab('register')">Create one free</a></p>
-      </div>
 
-      <!-- Register Form -->
-      <div id="auth-register-form" class="auth-form-wrap" style="display:none;">
-        <div class="fgrp">
-          <label for="reg-username">Username</label>
-          <input type="text" id="reg-username" class="auth-inp" placeholder="cinephile42" autocomplete="username">
-        </div>
-        <div class="fgrp">
-          <label for="reg-email">Email</label>
-          <input type="email" id="reg-email" class="auth-inp" placeholder="you@example.com" autocomplete="email">
-        </div>
-        <div class="fgrp">
-          <label for="reg-password">Password</label>
-          <div class="auth-pw-wrap">
-            <input type="password" id="reg-password" class="auth-inp" placeholder="Min. 6 characters" autocomplete="new-password">
-            <button type="button" class="pw-eye" onclick="togglePwVisibility('reg-password', this)">
-              <i class="fas fa-eye"></i>
-            </button>
+        <!-- Left panel: branding -->
+        <div class="auth-left">
+          <div class="auth-left-inner">
+            <div class="auth-logo">
+              <div class="auth-logo-icon"><i class="fas fa-film"></i></div>
+              <div>
+                <div class="auth-logo-name">Cinéma</div>
+                <div class="auth-logo-sub">Media Vault</div>
+              </div>
+            </div>
+            <div class="auth-tagline">
+              <p>Your personal<br><strong>cinematic universe</strong></p>
+              <div class="auth-features">
+                <div class="auth-feat"><i class="fas fa-check-circle"></i> Track movies & series</div>
+                <div class="auth-feat"><i class="fas fa-check-circle"></i> Your private vault</div>
+                <div class="auth-feat"><i class="fas fa-check-circle"></i> Auto-fill from TMDB</div>
+              </div>
+            </div>
           </div>
         </div>
-        <div id="auth-register-error" class="auth-error" style="display:none;"></div>
-        <button class="btn-gold auth-submit" id="register-submit-btn" onclick="submitRegister()">
-          <i class="fas fa-user-plus"></i> Create Account
-        </button>
-        <p class="auth-switch-hint">Already have an account? <a href="#" onclick="switchAuthTab('login')">Sign in</a></p>
+
+        <!-- Right panel: form -->
+        <div class="auth-right">
+
+          <!-- Tabs -->
+          <div class="auth-tabs">
+            <button class="auth-tab active" id="tab-login" onclick="switchAuthTab('login')">
+              Sign In
+            </button>
+            <button class="auth-tab" id="tab-register" onclick="switchAuthTab('register')">
+              Create Account
+            </button>
+            <div class="auth-tab-indicator" id="auth-tab-indicator"></div>
+          </div>
+
+          <!-- LOGIN -->
+          <div id="auth-login-form" class="auth-form-wrap">
+            <div class="auth-welcome">
+              <h2>Welcome back</h2>
+              <p>Sign in to your vault</p>
+            </div>
+
+            <div class="auth-field">
+              <div class="auth-field-icon"><i class="fas fa-envelope"></i></div>
+              <input type="email" id="auth-email" class="auth-inp"
+                placeholder="Email address" autocomplete="email"/>
+            </div>
+
+            <div class="auth-field">
+              <div class="auth-field-icon"><i class="fas fa-lock"></i></div>
+              <input type="password" id="auth-password" class="auth-inp"
+                placeholder="Password" autocomplete="current-password"/>
+              <button type="button" class="pw-eye" onclick="togglePwVisibility('auth-password',this)">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+
+            <div id="auth-login-error" class="auth-error" style="display:none"></div>
+
+            <button class="auth-submit-btn" id="login-submit-btn" onclick="submitLogin()">
+              <span>Sign In</span>
+              <i class="fas fa-arrow-right"></i>
+            </button>
+
+            <p class="auth-switch-hint">
+              No account yet?
+              <a href="#" onclick="switchAuthTab('register')">Create one free →</a>
+            </p>
+          </div>
+
+          <!-- REGISTER -->
+          <div id="auth-register-form" class="auth-form-wrap" style="display:none">
+            <div class="auth-welcome">
+              <h2>Join the vault</h2>
+              <p>Create your free account</p>
+            </div>
+
+            <div class="auth-field">
+              <div class="auth-field-icon"><i class="fas fa-user"></i></div>
+              <input type="text" id="reg-username" class="auth-inp"
+                placeholder="Username" autocomplete="username"/>
+            </div>
+
+            <div class="auth-field">
+              <div class="auth-field-icon"><i class="fas fa-envelope"></i></div>
+              <input type="email" id="reg-email" class="auth-inp"
+                placeholder="Email address" autocomplete="email"/>
+            </div>
+
+            <div class="auth-field">
+              <div class="auth-field-icon"><i class="fas fa-lock"></i></div>
+              <input type="password" id="reg-password" class="auth-inp"
+                placeholder="Password (min. 6 chars)" autocomplete="new-password"/>
+              <button type="button" class="pw-eye" onclick="togglePwVisibility('reg-password',this)">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+
+            <div id="auth-register-error" class="auth-error" style="display:none"></div>
+
+            <button class="auth-submit-btn" id="register-submit-btn" onclick="submitRegister()">
+              <span>Create Account</span>
+              <i class="fas fa-arrow-right"></i>
+            </button>
+
+            <p class="auth-switch-hint">
+              Already have an account?
+              <a href="#" onclick="switchAuthTab('login')">Sign in →</a>
+            </p>
+          </div>
+
+        </div><!-- /auth-right -->
       </div>
-
     </div>
-  </div>
 
-
-  <!-- Toast -->
-  <div id="toast" class="toast">
-    <div class="toast-content">
-      <i id="toast-icon" class="fas"></i>
-      <span id="toast-message"></span>
+    <!-- Toast -->
+    <div id="toast" class="toast">
+      <div class="toast-content">
+        <i id="toast-icon" class="fas"></i>
+        <span id="toast-message"></span>
+      </div>
+      <div class="toast-progress"></div>
     </div>
-    <div class="toast-progress"></div>
-  </div>
 
-  <!-- Loading -->
-  <div id="loading-spinner" class="loading-overlay">
-    <div class="loading-ring"><div></div><div></div><div></div><div></div></div>
-  </div>
+    <!-- Loading -->
+    <div id="loading-spinner" class="loading-overlay">
+      <div class="loading-ring">
+        <div></div>
+        <div></div>
+        <div></div>
+        <div></div>
+      </div>
+    </div>
 
-  <script src="script.js"></script>
-</body>
+    <script src="script.js"></script>
+  </body>
 </html>

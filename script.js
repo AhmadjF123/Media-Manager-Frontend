@@ -251,14 +251,24 @@ async function init() {
 }
 
 function toggleTheme(e) {
-  const isChecked = e.target.checked
-  if (isChecked) {
+  // Disable ALL transitions instantly → prevents 800-card repaint storm
+  const kill = document.createElement("style")
+  kill.id = "_theme_kill"
+  kill.textContent = "*,*::before,*::after{transition:none!important;animation:none!important}"
+  document.head.appendChild(kill)
+
+  if (e.target.checked) {
     document.body.classList.add("light-theme")
     localStorage.setItem("darkMode", "false")
   } else {
     document.body.classList.remove("light-theme")
     localStorage.setItem("darkMode", "true")
   }
+
+  // Re-enable after two frames (browser has committed the paint)
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    document.getElementById("_theme_kill")?.remove()
+  }))
 }
 
 function updateEndYearVisibility() {
@@ -384,50 +394,95 @@ function updateResultsTable(results) {
 //  CARD GRID
 // ════════════════════════════════════════════════
 
+// ── Progressive card rendering state ──
+let _cardPool = []
+let _cardRendered = 0
+let _cardObserver = null
+const CARD_BATCH = 40
+
+function buildMediaCard(item, index) {
+  const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0
+  const ratingColor = rating >= 8 ? "#4caf50" : rating >= 6 ? "#d4a843" : "#e53935"
+  const hasPoster = item.poster_url && item.poster_url.startsWith("http")
+  const typeLabel = item.media_type === "movie" ? "🎬 Movie" : "📺 Series"
+
+  const card = document.createElement("div")
+  card.className = "media-card"
+  card.dataset.index = index
+
+  card.innerHTML = `
+    <div class="card-chk-wrap">
+      <input type="checkbox" class="card-chk chk" onclick="event.stopPropagation(); toggleCardSelection(this, ${index})">
+    </div>
+    <div class="card-poster-wrap">
+      ${hasPoster
+        ? `<img src="${item.poster_url}" alt="${escapeHtml(item.title)}" class="card-poster-img" loading="lazy">`
+        : `<div class="card-poster-ph"><i class="fas fa-${item.media_type === "movie" ? "film" : "tv"}"></i></div>`
+      }
+      <div class="card-overlay">
+        <div class="card-rating-badge" style="background:${ratingColor}22;color:${ratingColor};border-color:${ratingColor}55;">
+          ★ ${rating.toFixed(1)}
+        </div>
+        <div class="card-type-chip ${item.media_type}">${typeLabel}</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="card-title-text" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
+      <div class="card-meta-text">${escapeHtml(item.genre)} · ${item.display_year}</div>
+    </div>
+  `
+
+  card.addEventListener("click", e => {
+    if (e.target.classList.contains("card-chk")) return
+    showDetailModal(item)
+  })
+  return card
+}
+
+function _renderCardBatch(grid) {
+  if (_cardRendered >= _cardPool.length) return
+  const end = Math.min(_cardRendered + CARD_BATCH, _cardPool.length)
+  const frag = document.createDocumentFragment()
+  for (let i = _cardRendered; i < end; i++) {
+    frag.appendChild(buildMediaCard(_cardPool[i], i))
+  }
+  _cardRendered = end
+  // Insert before sentinel if it exists
+  const sentinel = document.getElementById("card-sentinel")
+  if (sentinel) grid.insertBefore(frag, sentinel)
+  else grid.appendChild(frag)
+  // Remove sentinel if done
+  if (_cardRendered >= _cardPool.length && sentinel) {
+    _cardObserver?.disconnect()
+    sentinel.remove()
+  }
+}
+
 function updateCardGrid(results) {
   const grid = document.getElementById("card-grid")
   if (!grid) return
+  // Teardown old observer
+  _cardObserver?.disconnect()
+  _cardObserver = null
   grid.innerHTML = ""
+  _cardPool = results
+  _cardRendered = 0
 
-  results.forEach((item, index) => {
-    const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0
-    const ratingColor = rating >= 8 ? "#4caf50" : rating >= 6 ? "#d4a843" : "#e53935"
-    const hasPoster = item.poster_url && item.poster_url.startsWith("http")
+  // First batch — immediate
+  _renderCardBatch(grid)
 
-    const card = document.createElement("div")
-    card.className = "media-card"
-    card.style.animationDelay = `${index * 0.04}s`
-    card.dataset.index = index
+  // Sentinel for infinite scroll
+  if (_cardRendered < _cardPool.length) {
+    const sentinel = document.createElement("div")
+    sentinel.id = "card-sentinel"
+    sentinel.style.cssText = "height:1px;grid-column:1/-1;pointer-events:none;"
+    grid.appendChild(sentinel)
 
-    card.innerHTML = `
-      <div class="card-chk-wrap">
-        <input type="checkbox" class="card-chk chk" onclick="event.stopPropagation(); toggleCardSelection(this, ${index})">
-      </div>
-      <div class="card-poster-wrap">
-        ${hasPoster
-          ? `<img src="${item.poster_url}" alt="${escapeHtml(item.title)}" class="card-poster-img" loading="lazy">`
-          : `<div class="card-poster-ph"><i class="fas fa-${item.media_type === "movie" ? "film" : "tv"}"></i></div>`
-        }
-        <div class="card-overlay">
-          <div class="card-rating-badge" style="background:${ratingColor}22;color:${ratingColor};border-color:${ratingColor}55;">
-            ★ ${rating.toFixed(1)}
-          </div>
-          <div class="card-type-chip">${item.media_type === "movie" ? "🎬" : "📺"} ${item.media_type}</div>
-        </div>
-      </div>
-      <div class="card-body">
-        <div class="card-title-text" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
-        <div class="card-meta-text">${escapeHtml(item.genre)} · ${item.display_year}</div>
-      </div>
-    `
-
-    card.addEventListener("click", e => {
-      if (e.target.classList.contains("card-chk")) return
-      showDetailModal(item)
-    })
-
-    grid.appendChild(card)
-  })
+    _cardObserver = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) _renderCardBatch(grid)
+    }, { rootMargin: "300px" })
+    _cardObserver.observe(sentinel)
+  }
 }
 
 function toggleCardSelection(checkbox, index) {
@@ -469,6 +524,24 @@ function updateStats(results) {
 // ════════════════════════════════════════════════
 //  DETAIL MODAL
 // ════════════════════════════════════════════════
+
+// ── Fetch full TMDB details (overview, cast, trailer, runtime) ──
+async function fetchTMDBDetails(title, year, mediaType) {
+  try {
+    const endpoint = mediaType === "movie" ? "movie" : "tv"
+    const yearParam = mediaType === "movie" ? `&year=${year}` : `&first_air_date_year=${year}`
+    const searchRes = await fetch(
+      `${TMDB_BASE_URL}/search/${endpoint}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(title)}${yearParam}`
+    )
+    const searchData = await searchRes.json()
+    if (!searchData.results?.length) return null
+    const id = searchData.results[0].id
+    const detRes = await fetch(
+      `${TMDB_BASE_URL}/${endpoint}/${id}?api_key=${TMDB_API_KEY}&append_to_response=credits,videos`
+    )
+    return await detRes.json()
+  } catch { return null }
+}
 
 function showDetailModal(item) {
   const overlay = document.getElementById("detail-modal")
@@ -522,19 +595,88 @@ function showDetailModal(item) {
   document.getElementById("detail-genre-tags").innerHTML =
     genres.map(g => `<span class="genre-tag">${escapeHtml(g)}</span>`).join("")
 
+  // Clear extra info area
+  const extraEl = document.getElementById("detail-extra")
+  if (extraEl) {
+    extraEl.innerHTML = `<div class="det-extra-loading"><i class="fas fa-spinner fa-spin"></i> Loading details…</div>`
+  }
+
   // Edit button
   document.getElementById("detail-edit-btn").onclick = () => {
     closeDetailModal()
     setTimeout(() => editItemDirectly(item), 200)
   }
 
-  // Show
+  // Show modal
   overlay.style.display = "flex"
   document.body.style.overflow = "hidden"
-
-  // Trap escape key
   document.addEventListener("keydown", handleDetEscape)
+
+  // Async: fetch TMDB extra info
+  fetchTMDBDetails(item.title, item.release_year, item.media_type).then(tmdb => {
+    if (!tmdb || !extraEl) return
+
+    // Overview
+    const overview = tmdb.overview || ""
+
+    // Top cast (max 4)
+    const cast = (tmdb.credits?.cast || []).slice(0, 4)
+      .map(c => `<span class="cast-chip"><img src="${c.profile_path ? TMDB_IMAGE_URL + c.profile_path : ""}" onerror="this.style.display='none'" class="cast-img">${escapeHtml(c.name)}</span>`)
+      .join("")
+
+    // Trailer
+    const trailer = (tmdb.videos?.results || []).find(v => v.type === "Trailer" && v.site === "YouTube")
+      || (tmdb.videos?.results || []).find(v => v.site === "YouTube")
+
+    // Runtime / seasons
+    const runtime = tmdb.runtime
+      ? `<span class="meta-chip"><i class="fas fa-clock"></i> ${tmdb.runtime} min</span>`
+      : tmdb.number_of_seasons
+        ? `<span class="meta-chip"><i class="fas fa-layer-group"></i> ${tmdb.number_of_seasons} season${tmdb.number_of_seasons > 1 ? "s" : ""}</span>`
+        : ""
+
+    // TMDB score
+    const tmdbScore = tmdb.vote_average
+      ? `<span class="meta-chip tmdb-score"><i class="fas fa-star"></i> ${tmdb.vote_average.toFixed(1)} TMDB</span>`
+      : ""
+
+    // Append runtime/score to meta
+    if (runtime || tmdbScore) {
+      const metaEl = document.getElementById("detail-meta")
+      if (metaEl) metaEl.innerHTML += runtime + tmdbScore
+    }
+
+    extraEl.innerHTML = `
+      ${overview ? `<p class="det-overview">${escapeHtml(overview)}</p>` : ""}
+      ${cast ? `<div class="det-cast-row">${cast}</div>` : ""}
+      ${trailer
+        ? `<button class="btn-trailer" id="trailer-btn" onclick="playTrailer('${trailer.key}')">
+            <i class="fab fa-youtube"></i> Watch Trailer
+           </button>
+           <div id="trailer-frame" class="trailer-frame" style="display:none"></div>`
+        : ""
+      }
+    `
+  }).catch(() => {
+    if (extraEl) extraEl.innerHTML = ""
+  })
 }
+
+function playTrailer(key) {
+  const frame = document.getElementById("trailer-frame")
+  const btn   = document.getElementById("trailer-btn")
+  if (!frame) return
+  if (frame.style.display === "block") {
+    frame.style.display = "none"
+    frame.innerHTML = ""
+    if (btn) btn.innerHTML = `<i class="fab fa-youtube"></i> Watch Trailer`
+    return
+  }
+  frame.innerHTML = `<iframe src="https://www.youtube.com/embed/${key}?autoplay=1" frameborder="0" allowfullscreen allow="autoplay; encrypted-media"></iframe>`
+  frame.style.display = "block"
+  if (btn) btn.innerHTML = `<i class="fas fa-times"></i> Close Trailer`
+}
+window.playTrailer = playTrailer
 
 function handleDetEscape(e) {
   if (e.key === "Escape") closeDetailModal()
@@ -1183,23 +1325,26 @@ function _authModalEscClose(e) {
 
 // ── Switch between login / register tabs ──
 function switchAuthTab(tab) {
-  const loginForm  = document.getElementById("auth-login-form")
-  const regForm    = document.getElementById("auth-register-form")
-  const tabLogin   = document.getElementById("tab-login")
-  const tabReg     = document.getElementById("tab-register")
+  const loginForm = document.getElementById("auth-login-form")
+  const regForm   = document.getElementById("auth-register-form")
+  const tabLogin  = document.getElementById("tab-login")
+  const tabReg    = document.getElementById("tab-register")
+  const indicator = document.getElementById("auth-tab-indicator")
 
   if (tab === "login") {
     loginForm.style.display = "block"
     regForm.style.display   = "none"
     tabLogin.classList.add("active")
     tabReg.classList.remove("active")
-    document.getElementById("auth-email")?.focus()
+    if (indicator) indicator.classList.remove("right")
+    setTimeout(() => document.getElementById("auth-email")?.focus(), 50)
   } else {
     loginForm.style.display = "none"
     regForm.style.display   = "block"
     tabLogin.classList.remove("active")
     tabReg.classList.add("active")
-    document.getElementById("reg-username")?.focus()
+    if (indicator) indicator.classList.add("right")
+    setTimeout(() => document.getElementById("reg-username")?.focus(), 50)
   }
 }
 window.switchAuthTab = switchAuthTab
