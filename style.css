@@ -1251,3 +1251,220 @@ body {
   .toast { left:16px; right:16px; min-width:auto; }
   .form-footer-row { flex-direction: column; }
 }
+/* ════════════════════════════════════════════
+   AUTH AREA  (header)
+════════════════════════════════════════════ */
+.auth-area { display:flex; align-items:center; }
+
+/* Sign In button (guest) */
+.auth-btn.guest-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border-radius: 50px;
+  border: 1.5px solid var(--gold);
+  background: transparent;
+  color: var(--gold);
+  font-size: .85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.auth-btn.guest-btn:hover { background: var(--gold); color: #111; }
+
+/* Logged-in user pill */
+.user-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  padding: 5px 12px 5px 5px;
+  border-radius: 50px;
+}
+.user-avatar {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: #111;
+  font-weight: 700;
+  font-size: .85rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.user-name { font-size: .85rem; font-weight: 600; color: var(--text); max-width: 120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.logout-btn {
+  background: none; border: none;
+  color: var(--text-dim); cursor: pointer; padding: 4px;
+  font-size: .85rem;
+  border-radius: 50%;
+  transition: color .2s, background .2s;
+}
+.logout-btn:hover { color: #e53935; background: rgba(229,57,53,.1); }
+
+/* ════════════════════════════════════════════
+   GUEST BANNER
+════════════════════════════════════════════ */
+.guest-banner {
+  margin-bottom: 20px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, rgba(212,168,67,.08), rgba(212,168,67,.03));
+  border: 1px solid rgba(212,168,67,.25);
+  padding: 16px 20px;
+}
+.guest-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.guest-banner-inner > .fas {
+  font-size: 1.3rem;
+  color: var(--gold);
+  opacity: .8;
+}
+.guest-banner-inner > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.guest-banner-inner strong {
+  color: var(--text);
+  font-size: .9rem;
+}
+.guest-banner-inner span {
+  color: var(--text-dim);
+  font-size: .82rem;
+}
+
+/* ════════════════════════════════════════════
+   AUTH MODAL
+════════════════════════════════════════════ */
+.auth-overlay {
+  position: fixed; inset: 0; z-index: 9000;
+  background: rgba(0,0,0,.75);
+  backdrop-filter: blur(10px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.auth-box {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  width: 100%; max-width: 420px;
+  padding: 36px 32px 32px;
+  box-shadow: 0 40px 80px rgba(0,0,0,.6);
+  animation: authBoxIn .25s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes authBoxIn {
+  from { opacity:0; transform:scale(.9) translateY(20px); }
+  to   { opacity:1; transform:scale(1) translateY(0); }
+}
+.auth-modal-close {
+  position: absolute; top: 14px; right: 14px;
+  width: 30px; height: 30px;
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 50%; color: var(--text-dim);
+  cursor: pointer; font-size: .85rem;
+  display: flex; align-items: center; justify-content: center;
+  transition: color .2s, background .2s;
+}
+.auth-modal-close:hover { color: var(--text); background: var(--border); }
+
+/* Brand inside modal */
+.auth-brand {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 24px;
+}
+.brand-reel.small {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: var(--gold);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; color: #111;
+}
+.auth-brand-text {
+  font-size: 1.2rem; font-weight: 700;
+  color: var(--text);
+  letter-spacing: -.5px;
+}
+.auth-brand-text span { color: var(--gold); }
+
+/* Tabs */
+.auth-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--card-bg);
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 24px;
+}
+.auth-tab {
+  flex: 1; padding: 9px;
+  border: none; border-radius: 8px;
+  background: none; color: var(--text-dim);
+  font-size: .88rem; font-weight: 600; cursor: pointer;
+  transition: background .2s, color .2s;
+}
+.auth-tab.active {
+  background: var(--surface);
+  color: var(--gold);
+  box-shadow: 0 2px 8px rgba(0,0,0,.2);
+}
+
+/* Form inside modal */
+.auth-form-wrap { display: flex; flex-direction: column; gap: 16px; }
+.auth-inp {
+  width: 100%; padding: 11px 14px;
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-size: .9rem;
+  transition: border-color .2s;
+  box-sizing: border-box;
+}
+.auth-inp:focus { outline: none; border-color: var(--gold); }
+
+.auth-pw-wrap { position: relative; }
+.auth-pw-wrap .auth-inp { padding-right: 42px; }
+.pw-eye {
+  position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: .9rem; padding: 4px;
+  transition: color .2s;
+}
+.pw-eye:hover { color: var(--gold); }
+
+.auth-error {
+  background: rgba(229,57,53,.1);
+  border: 1px solid rgba(229,57,53,.3);
+  border-radius: 8px;
+  color: #e57373;
+  font-size: .83rem;
+  padding: 9px 12px;
+}
+.auth-submit {
+  width: 100%;
+  padding: 12px;
+  font-size: .95rem;
+  border-radius: 10px;
+}
+.auth-switch-hint {
+  text-align: center;
+  font-size: .82rem;
+  color: var(--text-dim);
+  margin: 0;
+}
+.auth-switch-hint a { color: var(--gold); text-decoration: none; font-weight: 600; }
+.auth-switch-hint a:hover { text-decoration: underline; }
+
+/* ════════════════════════════════════════════
+   RESPONSIVE — auth
+════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  .auth-box { padding: 28px 20px 24px; }
+  .user-name { display:none; }
+  .guest-banner-inner > .gold-btn { flex-shrink:0; }
+}

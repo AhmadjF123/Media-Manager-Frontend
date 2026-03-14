@@ -41,6 +41,23 @@
         </button>
       </nav>
 
+      <!-- Auth Button -->
+      <div class="auth-area" id="auth-area">
+        <!-- Guest state -->
+        <button class="auth-btn guest-btn" id="auth-open-btn" onclick="openAuthModal('login')">
+          <i class="fas fa-user-circle"></i>
+          <span>Sign In</span>
+        </button>
+        <!-- Logged-in state (hidden by default) -->
+        <div class="user-pill" id="user-pill" style="display:none;">
+          <div class="user-avatar" id="user-avatar">U</div>
+          <span class="user-name" id="user-name-label"></span>
+          <button class="logout-btn" id="logout-btn" onclick="logout()" title="Sign Out">
+            <i class="fas fa-sign-out-alt"></i>
+          </button>
+        </div>
+      </div>
+
       <!-- Theme toggle switch (replaces old icon button) -->
       <label class="switch" for="theme-checkbox">
         <input type="checkbox" id="theme-checkbox" />
@@ -57,6 +74,20 @@
 
     <!-- ═══════════ COLLECTION VIEW ═══════════ -->
     <section class="view" id="view-collection">
+
+      <!-- Guest banner -->
+      <div id="guest-banner" class="guest-banner" style="display:none;">
+        <div class="guest-banner-inner">
+          <i class="fas fa-lock"></i>
+          <div>
+            <strong>You're browsing as a guest</strong>
+            <span>Sign in to manage your personal vault — add, edit & track your collection.</span>
+          </div>
+          <button class="gold-btn" onclick="openAuthModal('login')">
+            <i class="fas fa-user-circle"></i> Sign In
+          </button>
+        </div>
+      </div>
 
       <!-- Stats ribbon -->
       <div class="stats-ribbon">
@@ -329,6 +360,74 @@
           <img id="edit-poster-image" src="" alt="Poster" class="poster-img" style="display:none;">
         </div>
       </div>
+    </div>
+  </div>
+
+
+  <!-- ═══════════ AUTH MODAL ═══════════ -->
+  <div id="auth-modal" class="auth-overlay" style="display:none;">
+    <div class="auth-box">
+      <button class="auth-modal-close" onclick="closeAuthModal()"><i class="fas fa-times"></i></button>
+
+      <div class="auth-brand">
+        <div class="brand-reel small"><i class="fas fa-film"></i></div>
+        <div class="auth-brand-text">Cinéma <span>Vault</span></div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tab-login"    onclick="switchAuthTab('login')">Sign In</button>
+        <button class="auth-tab"        id="tab-register" onclick="switchAuthTab('register')">Create Account</button>
+      </div>
+
+      <!-- Login Form -->
+      <div id="auth-login-form" class="auth-form-wrap">
+        <div class="fgrp">
+          <label for="auth-email">Email</label>
+          <input type="email" id="auth-email" class="auth-inp" placeholder="you@example.com" autocomplete="email">
+        </div>
+        <div class="fgrp">
+          <label for="auth-password">Password</label>
+          <div class="auth-pw-wrap">
+            <input type="password" id="auth-password" class="auth-inp" placeholder="••••••••" autocomplete="current-password">
+            <button type="button" class="pw-eye" onclick="togglePwVisibility('auth-password', this)">
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div id="auth-login-error" class="auth-error" style="display:none;"></div>
+        <button class="btn-gold auth-submit" id="login-submit-btn" onclick="submitLogin()">
+          <i class="fas fa-sign-in-alt"></i> Sign In
+        </button>
+        <p class="auth-switch-hint">Don't have an account? <a href="#" onclick="switchAuthTab('register')">Create one free</a></p>
+      </div>
+
+      <!-- Register Form -->
+      <div id="auth-register-form" class="auth-form-wrap" style="display:none;">
+        <div class="fgrp">
+          <label for="reg-username">Username</label>
+          <input type="text" id="reg-username" class="auth-inp" placeholder="cinephile42" autocomplete="username">
+        </div>
+        <div class="fgrp">
+          <label for="reg-email">Email</label>
+          <input type="email" id="reg-email" class="auth-inp" placeholder="you@example.com" autocomplete="email">
+        </div>
+        <div class="fgrp">
+          <label for="reg-password">Password</label>
+          <div class="auth-pw-wrap">
+            <input type="password" id="reg-password" class="auth-inp" placeholder="Min. 6 characters" autocomplete="new-password">
+            <button type="button" class="pw-eye" onclick="togglePwVisibility('reg-password', this)">
+              <i class="fas fa-eye"></i>
+            </button>
+          </div>
+        </div>
+        <div id="auth-register-error" class="auth-error" style="display:none;"></div>
+        <button class="btn-gold auth-submit" id="register-submit-btn" onclick="submitRegister()">
+          <i class="fas fa-user-plus"></i> Create Account
+        </button>
+        <p class="auth-switch-hint">Already have an account? <a href="#" onclick="switchAuthTab('login')">Sign in</a></p>
+      </div>
+
     </div>
   </div>
 

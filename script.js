@@ -14,6 +14,20 @@ const OMDB_API_KEY    = "5812b153"
 const TMDB_BASE_URL   = "https://api.themoviedb.org/3"
 const TMDB_IMAGE_URL  = "https://image.tmdb.org/t/p/w500"
 const API_BASE_URL    = "https://media-manager-backend-wfeb.onrender.com/api/media"
+const AUTH_BASE_URL   = "https://media-manager-backend-wfeb.onrender.com/api/auth"
+
+// ── Auth State ──
+let currentUser = null   // null = guest, { username, token } = logged in
+
+function getToken()    { return localStorage.getItem("cinema_token") }
+function setToken(t)   { localStorage.setItem("cinema_token", t) }
+function clearToken()  { localStorage.removeItem("cinema_token") }
+function authHeaders() {
+  const t = getToken()
+  return t
+    ? { "Content-Type": "application/json", "Authorization": `Bearer ${t}` }
+    : { "Content-Type": "application/json" }
+}
 
 // ── DOM References ──
 const searchInput       = document.getElementById("search-input")
@@ -74,12 +88,18 @@ function _cacheInvalidate()   { _cache.ts = 0 }
 
 // ── Fetch ALL media in one request (with cache) ──
 async function fetchAllMedia() {
+  // Guest users have no collection
+  if (!currentUser) return []
+
   const cached = _cacheGet()
   if (cached) return cached
 
   try {
     showLoading()
-    const response = await fetch(`${API_BASE_URL}/all?type=all`)
+    const response = await fetch(`${API_BASE_URL}/all?type=all`, {
+      headers: authHeaders()
+    })
+    if (response.status === 401) { handleUnauthorized(); return [] }
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
     const data = await response.json()
     hideLoading()
@@ -107,16 +127,18 @@ async function fetchMedia(mediaType) {
 }
 
 async function saveMedia(mediaType, mediaData) {
+  if (!currentUser) { openAuthModal('login'); return false }
   try {
     showLoading()
     const response = await fetch(API_BASE_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify({ type: mediaType, data: mediaData }),
     })
+    if (response.status === 401) { handleUnauthorized(); return false }
     const result = await response.json()
     hideLoading()
-    _cacheInvalidate()   // ← force fresh fetch next time
+    _cacheInvalidate()
     return result.success
   } catch(error) {
     hideLoading()
@@ -126,13 +148,15 @@ async function saveMedia(mediaType, mediaData) {
 }
 
 async function updateMedia(mediaType, orderNumber, mediaData) {
+  if (!currentUser) { openAuthModal('login'); return false }
   try {
     showLoading()
     const response = await fetch(API_BASE_URL, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify({ type: mediaType, order_number: orderNumber, data: mediaData }),
     })
+    if (response.status === 401) { handleUnauthorized(); return false }
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
     const text = await response.text()
     let result
@@ -140,7 +164,7 @@ async function updateMedia(mediaType, orderNumber, mediaData) {
       throw new Error(`Invalid JSON: ${text.substring(0,100)}...`)
     }
     hideLoading()
-    _cacheInvalidate()   // ← force fresh fetch next time
+    _cacheInvalidate()
     if (result.error) throw new Error(result.error)
     return result.success === true
   } catch(error) {
@@ -151,16 +175,18 @@ async function updateMedia(mediaType, orderNumber, mediaData) {
 }
 
 async function deleteMedia(mediaType, orderNumber) {
+  if (!currentUser) { openAuthModal('login'); return false }
   try {
     showLoading()
     const response = await fetch(API_BASE_URL, {
       method: "DELETE",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify({ type: mediaType, order_number: orderNumber }),
     })
+    if (response.status === 401) { handleUnauthorized(); return false }
     const result = await response.json()
     hideLoading()
-    _cacheInvalidate()   // ← force fresh fetch next time
+    _cacheInvalidate()
     return result.success
   } catch(error) {
     hideLoading()
@@ -174,6 +200,9 @@ async function deleteMedia(mediaType, orderNumber) {
 // ════════════════════════════════════════════════
 
 async function init() {
+  // ── Auth: restore session ──
+  await restoreSession()
+
   // Theme
   if (localStorage.getItem("darkMode") === "false") {
     document.body.classList.add("light-theme")
@@ -545,6 +574,13 @@ function editItemDirectly(item) {
 // ════════════════════════════════════════════════
 
 function switchView(view) {
+  // Guests can't add media
+  if (view === "add" && !currentUser) {
+    openAuthModal("login")
+    showToast("Please sign in to add titles to your vault", "info")
+    return
+  }
+
   const colView = document.getElementById("view-collection")
   const addView = document.getElementById("view-add")
   const navCol  = document.getElementById("nav-collection")
@@ -1046,3 +1082,252 @@ function escapeHtml(str) {
 //  BOOT
 // ════════════════════════════════════════════════
 document.addEventListener("DOMContentLoaded", init)
+
+// ════════════════════════════════════════════════
+//  AUTH SYSTEM
+// ════════════════════════════════════════════════
+
+// ── Restore session from localStorage ──
+async function restoreSession() {
+  const token    = getToken()
+  const username = localStorage.getItem("cinema_username")
+  if (!token) { updateAuthUI(null); return }
+
+  // Optimistically restore, then verify in background
+  currentUser = { token, username: username || "User" }
+  updateAuthUI(currentUser)
+
+  try {
+    const res = await fetch(`${AUTH_BASE_URL}/me`, { headers: authHeaders() })
+    if (res.ok) {
+      const data = await res.json()
+      currentUser = { token, username: data.username }
+      localStorage.setItem("cinema_username", data.username)
+      updateAuthUI(currentUser)
+    } else {
+      // Token expired
+      handleUnauthorized()
+    }
+  } catch { /* offline — keep local state */ }
+}
+
+// ── Update UI based on auth state ──
+function updateAuthUI(user) {
+  const guestBtn   = document.getElementById("auth-open-btn")
+  const userPill   = document.getElementById("user-pill")
+  const userAvatar = document.getElementById("user-avatar")
+  const userLabel  = document.getElementById("user-name-label")
+  const guestBanner = document.getElementById("guest-banner")
+  const navAdd     = document.getElementById("nav-add")
+
+  if (user) {
+    // Logged in
+    if (guestBtn)   guestBtn.style.display   = "none"
+    if (userPill)   userPill.style.display   = "flex"
+    if (userAvatar) userAvatar.textContent   = user.username.charAt(0).toUpperCase()
+    if (userLabel)  userLabel.textContent    = user.username
+    if (guestBanner) guestBanner.style.display = "none"
+    if (navAdd)     navAdd.style.opacity     = "1"
+  } else {
+    // Guest
+    if (guestBtn)   guestBtn.style.display   = "flex"
+    if (userPill)   userPill.style.display   = "none"
+    if (guestBanner) guestBanner.style.display = "flex"
+    if (navAdd)     navAdd.style.opacity     = "0.5"
+  }
+}
+
+// ── Handle expired / invalid token ──
+function handleUnauthorized() {
+  clearToken()
+  currentUser = null
+  _cacheInvalidate()
+  updateAuthUI(null)
+  showToast("Session expired — please sign in again", "info")
+}
+
+// ── Open / close auth modal ──
+function openAuthModal(tab = "login") {
+  const modal = document.getElementById("auth-modal")
+  if (!modal) return
+  modal.style.display = "flex"
+  document.body.style.overflow = "hidden"
+  switchAuthTab(tab)
+  // Close on backdrop click
+  modal.addEventListener("click", _authModalBackdropClose)
+  document.addEventListener("keydown", _authModalEscClose)
+}
+window.openAuthModal = openAuthModal
+
+function closeAuthModal() {
+  const modal = document.getElementById("auth-modal")
+  if (!modal) return
+  modal.style.display = "none"
+  document.body.style.overflow = ""
+  modal.removeEventListener("click", _authModalBackdropClose)
+  document.removeEventListener("keydown", _authModalEscClose)
+  // Clear errors
+  const loginErr = document.getElementById("auth-login-error")
+  const regErr   = document.getElementById("auth-register-error")
+  if (loginErr) loginErr.style.display = "none"
+  if (regErr)   regErr.style.display   = "none"
+}
+window.closeAuthModal = closeAuthModal
+
+function _authModalBackdropClose(e) {
+  if (e.target === document.getElementById("auth-modal")) closeAuthModal()
+}
+function _authModalEscClose(e) {
+  if (e.key === "Escape") closeAuthModal()
+}
+
+// ── Switch between login / register tabs ──
+function switchAuthTab(tab) {
+  const loginForm  = document.getElementById("auth-login-form")
+  const regForm    = document.getElementById("auth-register-form")
+  const tabLogin   = document.getElementById("tab-login")
+  const tabReg     = document.getElementById("tab-register")
+
+  if (tab === "login") {
+    loginForm.style.display = "block"
+    regForm.style.display   = "none"
+    tabLogin.classList.add("active")
+    tabReg.classList.remove("active")
+    document.getElementById("auth-email")?.focus()
+  } else {
+    loginForm.style.display = "none"
+    regForm.style.display   = "block"
+    tabLogin.classList.remove("active")
+    tabReg.classList.add("active")
+    document.getElementById("reg-username")?.focus()
+  }
+}
+window.switchAuthTab = switchAuthTab
+
+// ── Submit login ──
+async function submitLogin() {
+  const email    = document.getElementById("auth-email")?.value.trim()
+  const password = document.getElementById("auth-password")?.value
+  const errEl    = document.getElementById("auth-login-error")
+  const btn      = document.getElementById("login-submit-btn")
+
+  if (!email || !password) {
+    showAuthError(errEl, "Please enter your email and password")
+    return
+  }
+
+  btn.disabled = true
+  btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Signing in…`
+
+  try {
+    const res  = await fetch(`${AUTH_BASE_URL}/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password })
+    })
+    const data = await res.json()
+
+    if (!res.ok) {
+      showAuthError(errEl, data.error || "Login failed")
+    } else {
+      setToken(data.token)
+      localStorage.setItem("cinema_username", data.username)
+      currentUser = { token: data.token, username: data.username }
+      _cacheInvalidate()
+      updateAuthUI(currentUser)
+      closeAuthModal()
+      showToast(`Welcome back, ${data.username}! 🎬`, "success")
+      await searchMedia()
+    }
+  } catch {
+    showAuthError(errEl, "Network error — please try again")
+  }
+
+  btn.disabled = false
+  btn.innerHTML = `<i class="fas fa-sign-in-alt"></i> Sign In`
+}
+window.submitLogin = submitLogin
+
+// ── Submit register ──
+async function submitRegister() {
+  const username = document.getElementById("reg-username")?.value.trim()
+  const email    = document.getElementById("reg-email")?.value.trim()
+  const password = document.getElementById("reg-password")?.value
+  const errEl    = document.getElementById("auth-register-error")
+  const btn      = document.getElementById("register-submit-btn")
+
+  if (!username || !email || !password) {
+    showAuthError(errEl, "All fields are required")
+    return
+  }
+
+  btn.disabled = true
+  btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Creating account…`
+
+  try {
+    const res  = await fetch(`${AUTH_BASE_URL}/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, email, password })
+    })
+    const data = await res.json()
+
+    if (!res.ok) {
+      showAuthError(errEl, data.error || "Registration failed")
+    } else {
+      setToken(data.token)
+      localStorage.setItem("cinema_username", data.username)
+      currentUser = { token: data.token, username: data.username }
+      _cacheInvalidate()
+      updateAuthUI(currentUser)
+      closeAuthModal()
+      showToast(`Account created! Welcome, ${data.username} 🎉`, "success")
+      await searchMedia()
+    }
+  } catch {
+    showAuthError(errEl, "Network error — please try again")
+  }
+
+  btn.disabled = false
+  btn.innerHTML = `<i class="fas fa-user-plus"></i> Create Account`
+}
+window.submitRegister = submitRegister
+
+// ── Logout ──
+function logout() {
+  clearToken()
+  currentUser = null
+  _cacheInvalidate()
+  updateAuthUI(null)
+  switchView("collection")
+  updateResultsTable([])
+  showToast("Signed out successfully", "info")
+}
+window.logout = logout
+
+// ── Show error inside auth modal ──
+function showAuthError(el, msg) {
+  if (!el) return
+  el.textContent   = msg
+  el.style.display = "block"
+}
+
+// ── Toggle password visibility ──
+function togglePwVisibility(inputId, btn) {
+  const inp = document.getElementById(inputId)
+  if (!inp) return
+  const isHidden = inp.type === "password"
+  inp.type = isHidden ? "text" : "password"
+  btn.innerHTML = isHidden ? `<i class="fas fa-eye-slash"></i>` : `<i class="fas fa-eye"></i>`
+}
+window.togglePwVisibility = togglePwVisibility
+
+// Allow Enter key in auth forms
+document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("auth-password")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") submitLogin()
+  })
+  document.getElementById("reg-password")?.addEventListener("keydown", e => {
+    if (e.key === "Enter") submitRegister()
+  })
+})
