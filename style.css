@@ -1708,3 +1708,163 @@ body.light-theme .cast-chip {
   border-color: rgba(0,0,0,.1);
   color: var(--text-muted);
 }
+
+/* ════════════════════════════════════════════
+   SKELETON LOADING
+   — بنفس أبعاد media-card تماماً —
+════════════════════════════════════════════ */
+
+/* Shared shimmer animation */
+@keyframes skShimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+
+.sk-base {
+  background: linear-gradient(
+    90deg,
+    var(--card) 25%,
+    rgba(255,255,255,0.06) 50%,
+    var(--card) 75%
+  );
+  background-size: 600px 100%;
+  animation: skShimmer 1.6s infinite linear;
+  border-radius: 6px;
+}
+body.light-theme .sk-base {
+  background: linear-gradient(
+    90deg,
+    #e8e4dc 25%,
+    rgba(255,255,255,0.8) 50%,
+    #e8e4dc 75%
+  );
+  background-size: 600px 100%;
+}
+
+/* Card shell — exact copy of .media-card sizing */
+.skeleton-card {
+  position: relative;
+  border-radius: var(--radius);
+  background: var(--card);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  animation: cardIn 0.3s ease both;
+}
+
+/* Poster area — 2/3 ratio, same as .card-poster-wrap */
+.sk-poster {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2/3;
+  overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    var(--card) 25%,
+    rgba(255,255,255,0.06) 50%,
+    var(--card) 75%
+  );
+  background-size: 600px 100%;
+  animation: skShimmer 1.6s infinite linear;
+}
+body.light-theme .sk-poster {
+  background: linear-gradient(
+    90deg,
+    #e0dbd2 25%,
+    rgba(255,255,255,0.7) 50%,
+    #e0dbd2 75%
+  );
+  background-size: 600px 100%;
+}
+
+/* The travelling light line */
+.sk-shine {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(255,255,255,0.07) 50%,
+    transparent 60%
+  );
+  animation: skShimmer 1.6s infinite linear;
+}
+body.light-theme .sk-shine {
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(255,255,255,0.4) 50%,
+    transparent 60%
+  );
+}
+
+/* Rating badge placeholder (top right) */
+.sk-rating-badge {
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 44px; height: 20px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.1);
+}
+body.light-theme .sk-rating-badge { background: rgba(0,0,0,0.1); }
+
+/* Type chip placeholder (bottom left) */
+.sk-type-chip {
+  position: absolute;
+  bottom: 10px; left: 10px;
+  width: 60px; height: 18px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.1);
+}
+body.light-theme .sk-type-chip { background: rgba(0,0,0,0.08); }
+
+/* Card body lines */
+.sk-body {
+  padding: 12px 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sk-line {
+  height: 11px;
+  border-radius: 5px;
+  background: linear-gradient(
+    90deg,
+    var(--card) 25%,
+    rgba(255,255,255,0.06) 50%,
+    var(--card) 75%
+  );
+  background-size: 600px 100%;
+  animation: skShimmer 1.6s 0.15s infinite linear;
+}
+body.light-theme .sk-line {
+  background: linear-gradient(
+    90deg,
+    #e0dbd2 25%,
+    rgba(255,255,255,0.7) 50%,
+    #e0dbd2 75%
+  );
+  background-size: 600px 100%;
+}
+
+.sk-title { width: 80%; }
+.sk-meta  { width: 55%; opacity: 0.7; }
+
+/* Stats ribbon pulse while loading */
+.sk-stat-pulse {
+  position: relative;
+  overflow: hidden;
+  color: transparent !important;
+  background: linear-gradient(
+    90deg,
+    rgba(212,168,67,0.1) 25%,
+    rgba(212,168,67,0.25) 50%,
+    rgba(212,168,67,0.1) 75%
+  );
+  background-size: 400px 100%;
+  animation: skShimmer 1.4s infinite linear;
+  border-radius: 6px;
+  min-width: 40px;
+  min-height: 1em;
+  display: inline-block;
+}

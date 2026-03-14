@@ -86,6 +86,48 @@ function _cacheInvalidate()   { _cache.ts = 0 }
 //  API FUNCTIONS
 // ════════════════════════════════════════════════
 
+// ════════════════════════════════════════════════
+//  SKELETON LOADING
+// ════════════════════════════════════════════════
+
+function showSkeletons(count = 16) {
+  const grid = document.getElementById("card-grid")
+  if (!grid) return
+  // Clear any existing cards
+  _cardObserver?.disconnect()
+  grid.innerHTML = ""
+  const frag = document.createDocumentFragment()
+  for (let i = 0; i < count; i++) {
+    const sk = document.createElement("div")
+    sk.className = "skeleton-card"
+    sk.innerHTML = `
+      <div class="sk-poster">
+        <div class="sk-shine"></div>
+        <div class="sk-rating-badge"></div>
+        <div class="sk-type-chip"></div>
+      </div>
+      <div class="sk-body">
+        <div class="sk-line sk-title"></div>
+        <div class="sk-line sk-meta"></div>
+      </div>
+    `
+    frag.appendChild(sk)
+  }
+  grid.appendChild(frag)
+  // Also show stats as skeleton
+  ;["stat-movies","stat-series","stat-avg","stat-top"].forEach(id => {
+    const el = document.getElementById(id)
+    if (el) { el.dataset.real = el.textContent; el.classList.add("sk-stat-pulse") }
+  })
+}
+
+function hideSkeletons() {
+  ;["stat-movies","stat-series","stat-avg","stat-top"].forEach(id => {
+    const el = document.getElementById(id)
+    if (el) el.classList.remove("sk-stat-pulse")
+  })
+}
+
 // ── Fetch ALL media in one request (with cache) ──
 async function fetchAllMedia() {
   // Guest users have no collection
@@ -95,14 +137,15 @@ async function fetchAllMedia() {
   if (cached) return cached
 
   try {
-    showLoading()
+    // Show skeletons in the grid instead of fullscreen spinner
+    showSkeletons(20)
     const response = await fetch(`${API_BASE_URL}/all?type=all`, {
       headers: authHeaders()
     })
     if (response.status === 401) { handleUnauthorized(); return [] }
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
     const data = await response.json()
-    hideLoading()
+    hideSkeletons()
     if (!Array.isArray(data)) return []
     const normalised = data.map(item => ({
       ...item,
@@ -114,7 +157,7 @@ async function fetchAllMedia() {
     _cacheSet(normalised)
     return normalised
   } catch(error) {
-    hideLoading()
+    hideSkeletons()
     showToast(`Error fetching media: ${error.message}`, "error")
     return []
   }
