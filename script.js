@@ -673,7 +673,12 @@ function showDetailModal(item) {
 
     // Runtime / seasons
     const runtime = tmdb.runtime
-      ? `<span class="meta-chip"><i class="fas fa-clock"></i> ${tmdb.runtime} min</span>`
+      ? (() => {
+          const h = Math.floor(tmdb.runtime / 60)
+          const m = tmdb.runtime % 60
+          const label = h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`
+          return `<span class="meta-chip"><i class="fas fa-clock"></i> ${label}</span>`
+        })()
       : tmdb.number_of_seasons
         ? `<span class="meta-chip"><i class="fas fa-layer-group"></i> ${tmdb.number_of_seasons} season${tmdb.number_of_seasons > 1 ? "s" : ""}</span>`
         : ""
