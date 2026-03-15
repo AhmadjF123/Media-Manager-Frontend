@@ -7,8 +7,7 @@
 
     <link
       rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css
-"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.3/css/all.min.css"
     />
 
     <link rel="stylesheet" href="style.css" />
@@ -185,7 +184,9 @@
 
 
 
-          <div id="status-label" class="status-txt">Loading…</div>
+          <div id="status-label" class="status-txt">
+            <span class="status-film"><span></span><span></span><span></span></span>
+          </div>
 
 
           
@@ -611,11 +612,25 @@
 
     <!-- Loading -->
     <div id="loading-spinner" class="loading-overlay">
-      <div class="loading-ring">
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
+      <div class="cinema-loader">
+        <div class="film-reel">
+          <div class="reel-outer-ring"></div>
+          <div class="reel-spoke s1"></div>
+          <div class="reel-spoke s2"></div>
+          <div class="reel-spoke s3"></div>
+          <div class="reel-hub"><div class="reel-hub-inner"></div></div>
+          <div class="reel-hole" style="--a:0deg"></div>
+          <div class="reel-hole" style="--a:60deg"></div>
+          <div class="reel-hole" style="--a:120deg"></div>
+          <div class="reel-hole" style="--a:180deg"></div>
+          <div class="reel-hole" style="--a:240deg"></div>
+          <div class="reel-hole" style="--a:300deg"></div>
+        </div>
+        <div class="cinema-frames">
+          <span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span>
+        </div>
+        <p class="cinema-loader-label">Loading your vault…</p>
       </div>
     </div>
 
