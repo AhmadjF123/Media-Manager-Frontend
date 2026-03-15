@@ -417,7 +417,7 @@ function updateResultsTable(results) {
 
   // Status
   if (statusLabel) {
-    statusLabel.textContent = results.length > 0
+    statusLabel.innerHTML = results.length > 0
       ? `${results.length} title${results.length !== 1 ? "s" : ""} in collection`
       : "No results found"
   }

@@ -448,6 +448,31 @@ body {
   font-style: italic;
   flex: 1;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Inline animated film-strip bars for status label */
+.status-film {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 16px;
+}
+.status-film span {
+  width: 4px; height: 10px;
+  background: var(--gold);
+  border-radius: 1px;
+  opacity: 0.3;
+  animation: statusBar 1.2s ease-in-out infinite;
+}
+.status-film span:nth-child(1) { animation-delay: 0s; }
+.status-film span:nth-child(2) { animation-delay: 0.2s; }
+.status-film span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes statusBar {
+  0%, 100% { opacity: 0.2; transform: scaleY(0.5); }
+  50%       { opacity: 0.8; transform: scaleY(1); }
 }
 
 .tbl-actions { display:flex; gap:10px; }
@@ -1206,29 +1231,117 @@ body {
   justify-content: center;
 }
 
-.loading-ring {
-  display: inline-block;
-  position: relative;
-  width: 64px; height: 64px;
+/* ── Cinema Loader — Film Reel ── */
+.cinema-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
 }
-.loading-ring div {
-  box-sizing: border-box;
-  display: block;
-  position: absolute;
-  width: 50px; height: 50px;
-  margin: 7px;
-  border: 4px solid transparent;
-  border-radius: 50%;
-  animation: ringAnim 1.2s cubic-bezier(0.5,0,0.5,1) infinite;
-}
-.loading-ring div:nth-child(1) { border-top-color: var(--gold); animation-delay:-0.45s; }
-.loading-ring div:nth-child(2) { border-top-color: rgba(212,168,67,0.6); animation-delay:-0.3s; }
-.loading-ring div:nth-child(3) { border-top-color: rgba(212,168,67,0.3); animation-delay:-0.15s; }
-.loading-ring div:nth-child(4) { border-top-color: rgba(212,168,67,0.1); }
 
-@keyframes ringAnim {
-  0%   { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+/* The spinning reel */
+.film-reel {
+  position: relative;
+  width: 96px; height: 96px;
+  animation: reelSpin 2.2s linear infinite;
+  filter: drop-shadow(0 0 18px rgba(212,168,67,0.55));
+}
+
+/* Outer ring */
+.reel-outer-ring {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  border: 5px solid var(--gold);
+  box-shadow:
+    0 0 0 2px rgba(212,168,67,0.12),
+    inset 0 0 18px rgba(212,168,67,0.08);
+}
+
+/* 3 spokes at 120° each */
+.reel-spoke {
+  position: absolute;
+  width: 4px; height: 42px;
+  background: linear-gradient(to bottom, var(--gold), rgba(212,168,67,0.3));
+  border-radius: 2px;
+  top: 50%; left: 50%;
+  transform-origin: 50% 0%;
+}
+.reel-spoke.s1 { transform: translate(-50%, 0) rotate(0deg); }
+.reel-spoke.s2 { transform: translate(-50%, 0) rotate(120deg); }
+.reel-spoke.s3 { transform: translate(-50%, 0) rotate(240deg); }
+
+/* Center hub */
+.reel-hub {
+  position: absolute;
+  width: 26px; height: 26px;
+  background: var(--gold);
+  border-radius: 50%;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 14px rgba(212,168,67,0.9);
+}
+.reel-hub-inner {
+  width: 10px; height: 10px;
+  background: var(--bg);
+  border-radius: 50%;
+}
+
+/* 6 sprocket holes evenly around the reel */
+.reel-hole {
+  position: absolute;
+  width: 11px; height: 11px;
+  background: var(--bg);
+  border: 2px solid rgba(212,168,67,0.75);
+  border-radius: 50%;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) rotate(var(--a)) translateY(-36px);
+}
+
+@keyframes reelSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Film strip frames (7 small rects that pulse like a projector) */
+.cinema-frames {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 22px;
+}
+.cinema-frames span {
+  width: 8px; height: 14px;
+  background: var(--gold);
+  border-radius: 2px;
+  opacity: 0.2;
+  animation: frameFlicker 1.6s ease-in-out infinite;
+}
+.cinema-frames span:nth-child(1) { animation-delay: 0.00s; }
+.cinema-frames span:nth-child(2) { animation-delay: 0.13s; }
+.cinema-frames span:nth-child(3) { animation-delay: 0.26s; }
+.cinema-frames span:nth-child(4) { animation-delay: 0.39s; }
+.cinema-frames span:nth-child(5) { animation-delay: 0.52s; }
+.cinema-frames span:nth-child(6) { animation-delay: 0.65s; }
+.cinema-frames span:nth-child(7) { animation-delay: 0.78s; }
+
+@keyframes frameFlicker {
+  0%, 100% { opacity: 0.15; transform: scaleY(0.65); }
+  50%       { opacity: 1;    transform: scaleY(1); }
+}
+
+/* Label */
+.cinema-loader-label {
+  font-size: 0.75rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gold);
+  opacity: 0.65;
+  font-style: italic;
+  animation: labelPulse 2.2s ease-in-out infinite;
+}
+@keyframes labelPulse {
+  0%, 100% { opacity: 0.45; }
+  50%       { opacity: 0.9; }
 }
 
 /* ════════════════ RESPONSIVE ════════════════ */
