@@ -72,6 +72,20 @@ const toastIcon         = document.getElementById("toast-icon")
 const loadingSpinner    = document.getElementById("loading-spinner")
 const themeCheckbox     = document.getElementById("theme-checkbox")   // new switch
 
+// ── Personal / Notes fields (add form) ──
+const watchStatusSelect  = document.getElementById("watch-status")
+const watchDateInput     = document.getElementById("watch-date")
+const rewatchCountInput  = document.getElementById("rewatch-count")
+const favoriteChk        = document.getElementById("favorite-chk")
+const notesInput         = document.getElementById("notes")
+
+// ── Personal / Notes fields (edit modal) ──
+const editWatchStatusSelect = document.getElementById("edit-watch-status")
+const editWatchDateInput    = document.getElementById("edit-watch-date")
+const editRewatchCountInput = document.getElementById("edit-rewatch-count")
+const editFavoriteChk       = document.getElementById("edit-favorite-chk")
+const editNotesInput        = document.getElementById("edit-notes")
+
 // ── Global state ──
 let currentResults  = []
 let currentGridMode = 'grid'
@@ -293,6 +307,16 @@ async function init() {
   })
 }
 
+// ── Accordion toggle for Personal Notes section ──
+function togglePersonalSection(headerEl) {
+  const body  = headerEl.nextElementSibling
+  const arrow = headerEl.querySelector(".ps-arrow")
+  const isOpen = body.style.display !== "none"
+  body.style.display  = isOpen ? "none" : "block"
+  if (arrow) arrow.style.transform = isOpen ? "rotate(0deg)" : "rotate(180deg)"
+}
+window.togglePersonalSection = togglePersonalSection
+
 function toggleTheme(e) {
   // Disable ALL transitions instantly → prevents 800-card repaint storm
   const kill = document.createElement("style")
@@ -453,6 +477,16 @@ function buildMediaCard(item, index) {
   card.className = "media-card"
   card.dataset.index = index
 
+  const statusDotMap = {
+    watched: "#4caf50", watching: "#2196f3",
+    plan_to_watch: "#ff9800", dropped: "#e53935"
+  }
+  const statusDot = item.watch_status
+    ? `<div class="card-status-dot" style="background:${statusDotMap[item.watch_status]}" title="${item.watch_status.replace(/_/g,' ')}"></div>`
+    : ""
+  const favBadge = item.favorite
+    ? `<div class="card-fav-badge"><i class="fas fa-heart"></i></div>` : ""
+
   card.innerHTML = `
     <div class="card-chk-wrap">
       <input type="checkbox" class="card-chk chk" onclick="event.stopPropagation(); toggleCardSelection(this, ${index})">
@@ -468,6 +502,8 @@ function buildMediaCard(item, index) {
         </div>
         <div class="card-type-chip ${item.media_type}">${typeLabel}</div>
       </div>
+      ${statusDot}
+      ${favBadge}
     </div>
     <div class="card-body">
       <div class="card-title-text" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
@@ -648,6 +684,55 @@ function showDetailModal(item) {
   document.getElementById("detail-edit-btn").onclick = () => {
     closeDetailModal()
     setTimeout(() => editItemDirectly(item), 200)
+  }
+
+  // ── Personal section (local data, shown immediately) ──
+  const personalEl = document.getElementById("detail-personal")
+  if (personalEl) {
+    const statusLabels = {
+      watched:       "✅ Watched",
+      watching:      "▶️ Watching",
+      plan_to_watch: "🔖 Plan to Watch",
+      dropped:       "⛔ Dropped",
+    }
+    const statusClass = {
+      watched: "ps-watched", watching: "ps-watching",
+      plan_to_watch: "ps-plan", dropped: "ps-dropped"
+    }
+    const parts = []
+    if (item.watch_status) {
+      parts.push(`<span class="ps-badge ${statusClass[item.watch_status] || ''}">${statusLabels[item.watch_status] || item.watch_status}</span>`)
+    }
+    if (item.favorite) {
+      parts.push(`<span class="ps-badge ps-fav"><i class="fas fa-heart"></i> Favourite</span>`)
+    }
+    if (item.watch_date) {
+      const d = new Date(item.watch_date)
+      const formatted = d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
+      parts.push(`<span class="ps-chip"><i class="fas fa-calendar-check"></i> ${formatted}</span>`)
+    }
+    if (item.rewatch_count && item.rewatch_count > 0) {
+      parts.push(`<span class="ps-chip"><i class="fas fa-redo"></i> Watched ${item.rewatch_count}×</span>`)
+    }
+
+    const hasMeta = parts.length > 0
+    const hasNotes = item.notes && item.notes.trim()
+
+    if (hasMeta || hasNotes) {
+      personalEl.style.display = "block"
+      personalEl.innerHTML = `
+        <div class="ps-section">
+          ${hasMeta ? `<div class="ps-meta-row">${parts.join("")}</div>` : ""}
+          ${hasNotes ? `
+            <div class="ps-notes-block">
+              <div class="ps-notes-label"><i class="fas fa-pencil-alt"></i> My Notes</div>
+              <p class="ps-notes-text">${escapeHtml(item.notes)}</p>
+            </div>` : ""}
+        </div>
+      `
+    } else {
+      personalEl.style.display = "none"
+    }
   }
 
   // Show modal
@@ -848,6 +933,12 @@ async function addMedia(e) {
       release_year: releaseYear,
       rating,
       poster_url: posterImage.src && posterImage.src.startsWith("http") ? posterImage.src : null,
+      // Personal fields (optional)
+      notes:         notesInput?.value.trim()        || null,
+      watch_status:  watchStatusSelect?.value        || null,
+      watch_date:    watchDateInput?.value           || null,
+      favorite:      favoriteChk?.checked            || false,
+      rewatch_count: parseInt(rewatchCountInput?.value) || 0,
     }
 
     if (mediaType === "series") {
@@ -891,6 +982,12 @@ function clearForm() {
   posterPlaceholder.style.display = "flex"
   updateEndYearVisibility()
   titleInput.focus()
+  // Reset personal fields
+  if (watchStatusSelect)  watchStatusSelect.value = ""
+  if (watchDateInput)     watchDateInput.value    = ""
+  if (rewatchCountInput)  rewatchCountInput.value = ""
+  if (favoriteChk)        favoriteChk.checked     = false
+  if (notesInput)         notesInput.value        = ""
   showToast("Form cleared", "info")
 }
 
@@ -1088,6 +1185,23 @@ async function editSelected() {
       editPosterPlaceholder.style.display = "flex"
     }
 
+    // Populate personal fields
+    if (editWatchStatusSelect) editWatchStatusSelect.value = mediaItem.watch_status || ""
+    if (editWatchDateInput)    editWatchDateInput.value    = mediaItem.watch_date
+      ? new Date(mediaItem.watch_date).toISOString().split("T")[0] : ""
+    if (editRewatchCountInput) editRewatchCountInput.value = mediaItem.rewatch_count ?? 0
+    if (editFavoriteChk)       editFavoriteChk.checked     = !!mediaItem.favorite
+    if (editNotesInput)        editNotesInput.value        = mediaItem.notes || ""
+    // Auto-expand personal section if any personal data exists
+    const hasPersonal = mediaItem.watch_status || mediaItem.notes || mediaItem.favorite || mediaItem.watch_date
+    if (hasPersonal) {
+      const editModal = document.getElementById("edit-modal")
+      const psBody = editModal?.querySelector(".personal-section-body")
+      const psArrow = editModal?.querySelector(".ps-arrow")
+      if (psBody) psBody.style.display = "block"
+      if (psArrow) psArrow.style.transform = "rotate(180deg)"
+    }
+
     // Show edit modal with flex for centering
     editModal.style.display = "flex"
     editModal.style.alignItems = "center"
@@ -1167,6 +1281,12 @@ async function saveChanges(e) {
       release_year: releaseYear,
       rating,
       poster_url: editPosterImage.style.display === "block" ? editPosterImage.src : null,
+      // Personal fields
+      notes:         editNotesInput?.value.trim()        || null,
+      watch_status:  editWatchStatusSelect?.value        || null,
+      watch_date:    editWatchDateInput?.value           || null,
+      favorite:      editFavoriteChk?.checked            || false,
+      rewatch_count: parseInt(editRewatchCountInput?.value) || 0,
     }
 
     if (mediaType === "series") {
