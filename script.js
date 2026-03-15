@@ -417,7 +417,7 @@ function updateResultsTable(results) {
 
   // Status
   if (statusLabel) {
-    statusLabel.innerHTML = results.length > 0
+    statusLabel.textContent = results.length > 0
       ? `${results.length} title${results.length !== 1 ? "s" : ""} in collection`
       : "No results found"
   }
@@ -695,8 +695,7 @@ function showDetailModal(item) {
       ${trailer
         ? `<button class="btn-trailer" id="trailer-btn" onclick="playTrailer('${trailer.key}')">
             <i class="fab fa-youtube"></i> Watch Trailer
-           </button>
-           <div id="trailer-frame" class="trailer-frame" style="display:none"></div>`
+           </button>`
         : ""
       }
     `
@@ -706,23 +705,32 @@ function showDetailModal(item) {
 }
 
 function playTrailer(key) {
-  const frame = document.getElementById("trailer-frame")
-  const btn   = document.getElementById("trailer-btn")
-  if (!frame) return
-  if (frame.style.display === "block") {
-    frame.style.display = "none"
-    frame.innerHTML = ""
-    if (btn) btn.innerHTML = `<i class="fab fa-youtube"></i> Watch Trailer`
-    return
-  }
+  const lb    = document.getElementById("trailer-lightbox")
+  const frame = document.getElementById("trailer-lb-frame")
+  if (!lb || !frame) return
   frame.innerHTML = `<iframe src="https://www.youtube.com/embed/${key}?autoplay=1" frameborder="0" allowfullscreen allow="autoplay; encrypted-media"></iframe>`
-  frame.style.display = "block"
-  if (btn) btn.innerHTML = `<i class="fas fa-times"></i> Close Trailer`
+  lb.classList.add("open")
+  document.body.style.overflow = "hidden"
 }
-window.playTrailer = playTrailer
+
+function closeTrailerLightbox() {
+  const lb    = document.getElementById("trailer-lightbox")
+  const frame = document.getElementById("trailer-lb-frame")
+  if (!lb) return
+  lb.classList.remove("open")
+  if (frame) frame.innerHTML = ""
+}
+window.closeTrailerLightbox = closeTrailerLightbox
 
 function handleDetEscape(e) {
-  if (e.key === "Escape") closeDetailModal()
+  if (e.key === "Escape") {
+    const lb = document.getElementById("trailer-lightbox")
+    if (lb && lb.classList.contains("open")) {
+      closeTrailerLightbox()
+    } else {
+      closeDetailModal()
+    }
+  }
 }
 
 function closeDetailModal() {
@@ -731,6 +739,7 @@ function closeDetailModal() {
   overlay.style.display = "none"
   document.body.style.overflow = ""
   document.removeEventListener("keydown", handleDetEscape)
+  closeTrailerLightbox()
 }
 window.closeDetailModal = closeDetailModal
 
