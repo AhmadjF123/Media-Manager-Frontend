@@ -583,6 +583,8 @@
 
         <!-- Left panel: branding -->
         <div class="auth-left">
+          <!-- Film strip at bottom -->
+      
           <div class="auth-left-inner">
             <div class="auth-logo">
               <div class="auth-logo-icon"><i class="fas fa-film"></i></div>
@@ -594,9 +596,15 @@
             <div class="auth-tagline">
               <p>Your personal<br><strong>cinematic universe</strong></p>
               <div class="auth-features">
-                <div class="auth-feat"><i class="fas fa-check-circle"></i> Track movies & series</div>
-                <div class="auth-feat"><i class="fas fa-check-circle"></i> Your private vault</div>
-                <div class="auth-feat"><i class="fas fa-check-circle"></i> Auto-fill from TMDB</div>
+                <div class="auth-feat">
+                  <span class="auth-feat-icon"><i class="fas fa-check"></i></span>
+                  Track movies &amp; series
+                </div>
+                <div class="auth-feat">
+                  <span class="auth-feat-icon"><i class="fas fa-check"></i></span>
+                  Your private vault
+                </div>
+              
               </div>
             </div>
           </div>
@@ -623,7 +631,7 @@
               <p>Sign in to your vault</p>
             </div>
 
-            <div class="auth-field">
+            <div class="auth-field" style="margin-bottom: 10px;">
               <div class="auth-field-icon"><i class="fas fa-envelope"></i></div>
               <input type="email" id="auth-email" class="auth-inp"
                 placeholder="Email address" autocomplete="email"/>
@@ -664,7 +672,7 @@
                 placeholder="Username" autocomplete="username"/>
             </div>
 
-            <div class="auth-field">
+            <div class="auth-field" style="margin: 10px 0">
               <div class="auth-field-icon"><i class="fas fa-envelope"></i></div>
               <input type="email" id="reg-email" class="auth-inp"
                 placeholder="Email address" autocomplete="email"/>
