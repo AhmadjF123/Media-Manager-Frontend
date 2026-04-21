@@ -305,47 +305,61 @@
                 </div>
               </div>
               <!-- ── Personal Notes (optional) ── -->
-              <div class="personal-section">
+              <div class="personal-section personal-section--open">
                 <div class="personal-section-hdr" onclick="togglePersonalSection(this)">
-                  <span><i class="fas fa-journal-whills"></i> Personal Notes <em>(optional)</em></span>
-                  <i class="fas fa-chevron-down ps-arrow"></i>
-                </div>
-                <div class="personal-section-body" style="display:none">
-                  <div class="frow">
-                    <div class="fgrp">
-                      <label for="watch-status">Watch Status</label>
-                      <select id="watch-status" class="f-select">
-                        <option value="">— Not set —</option>
-                        <option value="watched">✅ Watched</option>
-                        <option value="watching">▶️ Watching</option>
-                        <option value="plan_to_watch">🔖 Plan to Watch</option>
-                        <option value="dropped">⛔ Dropped</option>
-                      </select>
-                    </div>
-                    <div class="fgrp fgrp-sm">
-                      <label for="watch-date">Watch Date</label>
-                      <input type="date" id="watch-date" />
+                  <div class="personal-section-title-wrap">
+                    <span class="personal-section-icon"><i class="fas fa-book-open"></i></span>
+                    <div class="personal-section-title-group">
+                      <span class="personal-section-title">Personal Notes</span>
+                      <em>(optional)</em>
                     </div>
                   </div>
-                  <div class="frow">
-                    <div class="fgrp fgrp-sm">
-                      <label for="rewatch-count">Times Watched</label>
-                      <input type="number" id="rewatch-count" min="0" placeholder="0" />
+                  <i class="fas fa-chevron-up ps-arrow"></i>
+                </div>
+                <div class="personal-section-body">
+                  <div class="personal-grid">
+                    <div class="personal-field personal-field--status">
+                      <label for="watch-status">Watch Status</label>
+                      <div class="select-shell">
+                        <select id="watch-status" class="f-select personal-input personal-select">
+                          <option value="">— Not set —</option>
+                          <option value="watched">✅ Watched</option>
+                          <option value="watching">▶️ Watching</option>
+                          <option value="plan_to_watch">🔖 Plan to Watch</option>
+                          <option value="dropped">⛔ Dropped</option>
+                        </select>
+                        <span class="select-shell-icon"><i class="fas fa-chevron-down"></i></span>
+                      </div>
                     </div>
-                    <div class="fgrp fav-fgrp">
+
+                    <div class="personal-field personal-field--date">
+                      <label for="watch-date">Watch Date</label>
+                      <div class="date-input-wrap">
+                        <input type="date" id="watch-date" class="personal-input personal-date-input" placeholder="mm/dd/yyyy" />
+                        <button type="button" class="date-picker-btn" data-date-target="watch-date" aria-label="Open date picker">
+                          <i class="fas fa-calendar-alt"></i>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="personal-field personal-field--count">
+                      <label for="rewatch-count">Times Watched</label>
+                      <input type="number" id="rewatch-count" min="0" placeholder="0" class="personal-input" />
+                    </div>
+
+                    <div class="personal-field personal-field--fav">
                       <label>Favourite</label>
-                      <label class="fav-toggle">
+                      <label class="fav-toggle fav-toggle--wide">
                         <input type="checkbox" id="favorite-chk" />
-                        <span class="fav-toggle-track">
-                          <i class="fas fa-heart"></i>
-                        </span>
+                        <span class="fav-toggle-track"><i class="fas fa-heart"></i></span>
                         <span class="fav-label-text">Mark as favourite</span>
                       </label>
                     </div>
-                  </div>
-                  <div class="fgrp fgrp-full">
-                    <label for="notes">My Notes</label>
-                    <textarea id="notes" rows="3" placeholder="Your thoughts, what you liked, memorable scenes…" class="notes-ta"></textarea>
+
+                    <div class="personal-field personal-field--notes">
+                      <label for="notes">My Notes</label>
+                      <textarea id="notes" rows="5" placeholder="Your thoughts, what you liked, memorable scenes..." class="notes-ta"></textarea>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -501,45 +515,59 @@
               <!-- ── Personal Notes (edit modal) ── -->
               <div class="personal-section">
                 <div class="personal-section-hdr" onclick="togglePersonalSection(this)">
-                  <span><i class="fas fa-journal-whills"></i> Personal Notes <em>(optional)</em></span>
-                  <i class="fas fa-chevron-down ps-arrow"></i>
-                </div>
-                <div class="personal-section-body" style="display:none">
-                  <div class="frow">
-                    <div class="fgrp">
-                      <label for="edit-watch-status">Watch Status</label>
-                      <select id="edit-watch-status" class="f-select">
-                        <option value="">— Not set —</option>
-                        <option value="watched">✅ Watched</option>
-                        <option value="watching">▶️ Watching</option>
-                        <option value="plan_to_watch">🔖 Plan to Watch</option>
-                        <option value="dropped">⛔ Dropped</option>
-                      </select>
-                    </div>
-                    <div class="fgrp fgrp-sm">
-                      <label for="edit-watch-date">Watch Date</label>
-                      <input type="date" id="edit-watch-date" />
+                  <div class="personal-section-title-wrap">
+                    <span class="personal-section-icon"><i class="fas fa-book-open"></i></span>
+                    <div class="personal-section-title-group">
+                      <span class="personal-section-title">Personal Notes</span>
+                      <em>(optional)</em>
                     </div>
                   </div>
-                  <div class="frow">
-                    <div class="fgrp fgrp-sm">
-                      <label for="edit-rewatch-count">Times Watched</label>
-                      <input type="number" id="edit-rewatch-count" min="0" placeholder="0" />
+                  <i class="fas fa-chevron-down ps-arrow"></i>
+                </div>
+                <div class="personal-section-body">
+                  <div class="personal-grid">
+                    <div class="personal-field personal-field--status">
+                      <label for="edit-watch-status">Watch Status</label>
+                      <div class="select-shell">
+                        <select id="edit-watch-status" class="f-select personal-input personal-select">
+                          <option value="">— Not set —</option>
+                          <option value="watched">✅ Watched</option>
+                          <option value="watching">▶️ Watching</option>
+                          <option value="plan_to_watch">🔖 Plan to Watch</option>
+                          <option value="dropped">⛔ Dropped</option>
+                        </select>
+                        <span class="select-shell-icon"><i class="fas fa-chevron-down"></i></span>
+                      </div>
                     </div>
-                    <div class="fgrp fav-fgrp">
+
+                    <div class="personal-field personal-field--date">
+                      <label for="edit-watch-date">Watch Date</label>
+                      <div class="date-input-wrap">
+                        <input type="date" id="edit-watch-date" class="personal-input personal-date-input" placeholder="mm/dd/yyyy" />
+                        <button type="button" class="date-picker-btn" data-date-target="edit-watch-date" aria-label="Open date picker">
+                          <i class="fas fa-calendar-alt"></i>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="personal-field personal-field--count">
+                      <label for="edit-rewatch-count">Times Watched</label>
+                      <input type="number" id="edit-rewatch-count" min="0" placeholder="0" class="personal-input" />
+                    </div>
+
+                    <div class="personal-field personal-field--fav">
                       <label>Favourite</label>
-                      <label class="fav-toggle">
+                      <label class="fav-toggle fav-toggle--wide">
                         <input type="checkbox" id="edit-favorite-chk" />
-                        <span class="fav-toggle-track">
-                          <i class="fas fa-heart"></i>
-                        </span>
+                        <span class="fav-toggle-track"><i class="fas fa-heart"></i></span>
                         <span class="fav-label-text">Mark as favourite</span>
                       </label>
                     </div>
-                  </div>
-                  <div class="fgrp fgrp-full">
-                    <label for="edit-notes">My Notes</label>
-                    <textarea id="edit-notes" rows="3" placeholder="Your thoughts, what you liked, memorable scenes…" class="notes-ta"></textarea>
+
+                    <div class="personal-field personal-field--notes">
+                      <label for="edit-notes">My Notes</label>
+                      <textarea id="edit-notes" rows="5" placeholder="Your thoughts, what you liked, memorable scenes..." class="notes-ta"></textarea>
+                    </div>
                   </div>
                 </div>
               </div>

@@ -270,6 +270,7 @@ async function init() {
   themeCheckbox.addEventListener("change", toggleTheme)
 
   updateEndYearVisibility()
+  bindDatePickerButtons()
   await searchMedia()
 
   // Event listeners
@@ -309,13 +310,26 @@ async function init() {
 
 // ── Accordion toggle for Personal Notes section ──
 function togglePersonalSection(headerEl) {
-  const body  = headerEl.nextElementSibling
-  const arrow = headerEl.querySelector(".ps-arrow")
-  const isOpen = body.style.display !== "none"
-  body.style.display  = isOpen ? "none" : "block"
-  if (arrow) arrow.style.transform = isOpen ? "rotate(0deg)" : "rotate(180deg)"
+  const section = headerEl.closest(".personal-section")
+  if (!section) return
+  section.classList.toggle("personal-section--open")
 }
 window.togglePersonalSection = togglePersonalSection
+
+function bindDatePickerButtons(root = document) {
+  root.querySelectorAll(".date-picker-btn").forEach(btn => {
+    if (btn.dataset.bound === "1") return
+    btn.dataset.bound = "1"
+    btn.addEventListener("click", () => {
+      const targetId = btn.dataset.dateTarget
+      const input = targetId ? document.getElementById(targetId) : null
+      if (!input) return
+      input.focus()
+      if (typeof input.showPicker === "function") input.showPicker()
+      else input.click()
+    })
+  })
+}
 
 function toggleTheme(e) {
   // Disable ALL transitions instantly → prevents 800-card repaint storm
@@ -977,6 +991,7 @@ async function addMedia(e) {
 
 function clearForm() {
   addForm.reset()
+  document.querySelector("#view-add .personal-section")?.classList.add("personal-section--open")
   posterImage.src = ""
   posterImage.style.display = "none"
   posterPlaceholder.style.display = "flex"
@@ -1196,10 +1211,12 @@ async function editSelected() {
     const hasPersonal = mediaItem.watch_status || mediaItem.notes || mediaItem.favorite || mediaItem.watch_date
     if (hasPersonal) {
       const editModal = document.getElementById("edit-modal")
-      const psBody = editModal?.querySelector(".personal-section-body")
-      const psArrow = editModal?.querySelector(".ps-arrow")
-      if (psBody) psBody.style.display = "block"
-      if (psArrow) psArrow.style.transform = "rotate(180deg)"
+      const psSection = editModal?.querySelector(".personal-section")
+      if (psSection) psSection.classList.add("personal-section--open")
+    }
+
+    if (!hasPersonal) {
+      editModal?.querySelector(".personal-section")?.classList.remove("personal-section--open")
     }
 
     // Show edit modal with flex for centering
@@ -1221,6 +1238,7 @@ function handleEditEscape(e) {
 
 function closeModal() {
   editModal.style.display = "none"
+  editModal?.querySelector(".personal-section")?.classList.remove("personal-section--open")
   document.body.style.overflow = ""
   document.removeEventListener("keydown", handleEditEscape)
 }
