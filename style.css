@@ -2442,7 +2442,7 @@ body.light-theme .sk-line {
 }
 
 .personal-section-title {
-  font-size: 1rem;
+  font-size: 0.92rem;
   font-weight: 700;
   color: var(--text);
   letter-spacing: 0.02em;
@@ -2452,6 +2452,7 @@ body.light-theme .sk-line {
   font-style: italic;
   color: var(--text-muted);
   font-weight: 500;
+  font-size: 0.84rem;
 }
 
 .ps-arrow {
@@ -2496,11 +2497,11 @@ body.light-theme .sk-line {
 
 .personal-field label {
   display: block;
-  margin-bottom: 12px;
-  font-size: 0.84rem;
-  font-weight: 700;
+  margin-bottom: 10px;
+  font-size: 0.78rem;
+  font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 1.5px;
   color: var(--text-muted);
 }
 
@@ -2525,9 +2526,9 @@ body.light-theme .sk-line {
 
 .personal-input,
 .personal-select {
-  min-height: 58px;
-  padding: 0 18px;
-  font-size: 0.98rem;
+  min-height: 56px;
+  padding: 0 16px;
+  font-size: 0.95rem;
 }
 
 .personal-input::placeholder,
@@ -2573,11 +2574,11 @@ body.light-theme .sk-line {
 
 .personal-date-input {
   width: 100%;
-  min-height: 58px;
-  padding: 0 18px;
+  min-height: 56px;
+  padding: 0 16px;
   background: transparent;
   border: none;
-  font-size: 0.98rem;
+  font-size: 0.95rem;
 }
 
 .personal-date-input::-webkit-calendar-picker-indicator {
@@ -2610,10 +2611,10 @@ body.light-theme .sk-line {
 .notes-ta {
   resize: vertical;
   min-height: 150px;
-  padding: 18px;
+  padding: 16px;
   font-family: inherit;
-  font-size: 0.98rem;
-  line-height: 1.6;
+  font-size: 0.95rem;
+  line-height: 1.55;
 }
 
 .fav-toggle {
@@ -2665,7 +2666,7 @@ body.light-theme .sk-line {
 }
 
 .fav-label-text {
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   color: var(--text-muted);
   font-weight: 600;
   letter-spacing: 0.04em;
