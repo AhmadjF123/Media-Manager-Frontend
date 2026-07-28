@@ -162,37 +162,113 @@
 
         <!-- Toolbar -->
         <div class="toolbar">
-          <div class="view-switcher">
-            <button
-              class="vs-btn active"
-              id="grid-toggle-btn"
-              onclick="toggleGridView('grid')"
-              title="Grid view"
-            >
-              <i class="fas fa-th-large"></i>
-            </button>
-            <button
-              class="vs-btn"
-              id="list-toggle-btn"
-              onclick="toggleGridView('list')"
-              title="List view"
-            >
-              <i class="fas fa-list"></i>
-            </button>
+          <div class="toolbar-left">
+            <div class="view-switcher" aria-label="Choose collection view">
+              <button
+                class="vs-btn active"
+                id="grid-toggle-btn"
+                onclick="toggleGridView('grid')"
+                title="Grid view"
+                aria-label="Grid view"
+              >
+                <i class="fas fa-th-large"></i>
+              </button>
+              <button
+                class="vs-btn"
+                id="list-toggle-btn"
+                onclick="toggleGridView('list')"
+                title="List view"
+                aria-label="List view"
+              >
+                <i class="fas fa-list"></i>
+              </button>
+            </div>
+
+            <!-- Cinematic sorting control (shared by Grid & List views) -->
+            <div class="sort-studio" id="sort-studio">
+              <button
+                type="button"
+                class="sort-main-btn"
+                id="sort-menu-btn"
+                aria-haspopup="true"
+                aria-expanded="false"
+                aria-controls="sort-popover"
+              >
+                <span class="sort-glyph"><i class="fas fa-sliders"></i></span>
+                <span class="sort-copy">
+                  <span class="sort-kicker">Sort collection</span>
+                  <strong id="sort-current-label">Recently added</strong>
+                </span>
+                <i class="fas fa-chevron-down sort-chevron" id="sort-menu-chevron"></i>
+              </button>
+
+              <button
+                type="button"
+                class="sort-direction-btn"
+                id="sort-direction-btn"
+                title="Reverse sort direction"
+                aria-label="Reverse sort direction"
+              >
+                <i class="fas fa-arrow-down-wide-short" id="sort-direction-icon"></i>
+                <span id="sort-direction-short">Newest</span>
+              </button>
+
+              <div class="sort-popover" id="sort-popover" role="menu" aria-hidden="true">
+                <div class="sort-popover-head">
+                  <div>
+                    <span>Arrange your vault</span>
+                    <strong>Choose what leads the reel</strong>
+                  </div>
+                  <i class="fas fa-film"></i>
+                </div>
+
+                <button type="button" class="sort-option" data-sort-field="added" role="menuitemradio">
+                  <span class="sort-option-icon"><i class="fas fa-clock-rotate-left"></i></span>
+                  <span class="sort-option-copy">
+                    <strong>Date added</strong>
+                    <small>Newest or oldest additions</small>
+                  </span>
+                  <i class="fas fa-check sort-option-check"></i>
+                </button>
+
+                <button type="button" class="sort-option" data-sort-field="title" role="menuitemradio">
+                  <span class="sort-option-icon"><i class="fas fa-font"></i></span>
+                  <span class="sort-option-copy">
+                    <strong>Title</strong>
+                    <small>Alphabetical A–Z or Z–A</small>
+                  </span>
+                  <i class="fas fa-check sort-option-check"></i>
+                </button>
+
+                <button type="button" class="sort-option" data-sort-field="release_year" role="menuitemradio">
+                  <span class="sort-option-icon"><i class="fas fa-calendar-days"></i></span>
+                  <span class="sort-option-copy">
+                    <strong>Release year</strong>
+                    <small>Newest or oldest releases</small>
+                  </span>
+                  <i class="fas fa-check sort-option-check"></i>
+                </button>
+
+                <button type="button" class="sort-option" data-sort-field="rating" role="menuitemradio">
+                  <span class="sort-option-icon"><i class="fas fa-star"></i></span>
+                  <span class="sort-option-copy">
+                    <strong>Rating</strong>
+                    <small>Highest or lowest rated</small>
+                  </span>
+                  <i class="fas fa-check sort-option-check"></i>
+                </button>
+
+                <div class="sort-popover-foot">
+                  <i class="fas fa-wand-magic-sparkles"></i>
+                  Your choice is remembered automatically
+                </div>
+              </div>
+            </div>
           </div>
 
-
-
-
-          <div id="status-label" class="status-txt">
+          <div id="status-label" class="status-txt" aria-live="polite">
             <span class="status-film"><span></span><span></span><span></span></span>
           </div>
-
-
-          
-
-
-
 
           <div class="tbl-actions">
             <button id="edit-btn" class="act-btn">
@@ -213,11 +289,27 @@
             <thead>
               <tr>
                 <th><input type="checkbox" id="select-all" class="chk" /></th>
-                <th>#</th>
-                <th>Title</th>
+                <th class="sort-th" data-sort-field="added" aria-sort="none">
+                  <button type="button" class="table-sort-btn" data-sort-field="added" title="Sort by date added">
+                    <span>#</span><i class="fas fa-sort table-sort-icon"></i>
+                  </button>
+                </th>
+                <th class="sort-th" data-sort-field="title" aria-sort="none">
+                  <button type="button" class="table-sort-btn" data-sort-field="title">
+                    <span>Title</span><i class="fas fa-sort table-sort-icon"></i>
+                  </button>
+                </th>
                 <th>Genre</th>
-                <th>Year</th>
-                <th>Rating</th>
+                <th class="sort-th" data-sort-field="release_year" aria-sort="none">
+                  <button type="button" class="table-sort-btn" data-sort-field="release_year">
+                    <span>Year</span><i class="fas fa-sort table-sort-icon"></i>
+                  </button>
+                </th>
+                <th class="sort-th" data-sort-field="rating" aria-sort="none">
+                  <button type="button" class="table-sort-btn" data-sort-field="rating">
+                    <span>Rating</span><i class="fas fa-sort table-sort-icon"></i>
+                  </button>
+                </th>
                 <th>Type</th>
               </tr>
             </thead>

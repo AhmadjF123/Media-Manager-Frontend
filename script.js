@@ -71,6 +71,13 @@ const toastMessage      = document.getElementById("toast-message")
 const toastIcon         = document.getElementById("toast-icon")
 const loadingSpinner    = document.getElementById("loading-spinner")
 const themeCheckbox     = document.getElementById("theme-checkbox")   // new switch
+const sortStudio         = document.getElementById("sort-studio")
+const sortMenuBtn        = document.getElementById("sort-menu-btn")
+const sortPopover        = document.getElementById("sort-popover")
+const sortDirectionBtn   = document.getElementById("sort-direction-btn")
+const sortCurrentLabel   = document.getElementById("sort-current-label")
+const sortDirectionShort = document.getElementById("sort-direction-short")
+const sortDirectionIcon  = document.getElementById("sort-direction-icon")
 
 // ── Personal / Notes fields (add form) ──
 const watchStatusSelect  = document.getElementById("watch-status")
@@ -89,6 +96,12 @@ const editNotesInput        = document.getElementById("edit-notes")
 // ── Global state ──
 let currentResults  = []
 let currentGridMode = 'grid'
+
+// ── Sorting state ──
+const SORT_STORAGE_KEY = "cinema_sort_preference"
+const SORT_FIELDS = new Set(["added", "title", "release_year", "rating"])
+const titleCollator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true })
+let sortState = loadSortState()
 
 // ── Cache layer (avoids redundant network calls) ──
 const _cache = { data: null, ts: 0, TTL: 60_000 }   // 60s cache
@@ -153,7 +166,12 @@ async function fetchAllMedia() {
   try {
     // Show skeletons in the grid instead of fullscreen spinner
     showSkeletons(20)
-    const response = await fetch(`${API_BASE_URL}/all?type=all`, {
+    const params = new URLSearchParams({
+      type: "all",
+      sort_by: sortState.field,
+      sort_order: sortState.direction,
+    })
+    const response = await fetch(`${API_BASE_URL}/all?${params.toString()}`, {
       headers: authHeaders()
     })
     if (response.status === 401) { handleUnauthorized(); return [] }
@@ -271,6 +289,8 @@ async function init() {
 
   updateEndYearVisibility()
   bindDatePickerButtons()
+  bindSortControls()
+  updateSortUI()
   await searchMedia()
 
   // Event listeners
@@ -385,6 +405,198 @@ function toggleRowSelection(checkbox) {
 }
 window.toggleRowSelection = toggleRowSelection
 
+
+// ════════════════════════════════════════════════
+//  SORTING
+// ════════════════════════════════════════════════
+
+function loadSortState() {
+  const fallback = { field: "added", direction: "desc" }
+  try {
+    const saved = JSON.parse(localStorage.getItem(SORT_STORAGE_KEY) || "null")
+    if (!saved || !SORT_FIELDS.has(saved.field)) return fallback
+    return {
+      field: saved.field,
+      direction: saved.direction === "asc" ? "asc" : "desc",
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function saveSortState() {
+  try { localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(sortState)) } catch { /* storage unavailable */ }
+}
+
+function defaultSortDirection(field) {
+  return field === "title" ? "asc" : "desc"
+}
+
+function getSortFieldLabel(field = sortState.field) {
+  return {
+    added: "Date added",
+    title: "Title",
+    release_year: "Release year",
+    rating: "Rating",
+  }[field] || "Date added"
+}
+
+function getSortDirectionCopy(field = sortState.field, direction = sortState.direction) {
+  const isAsc = direction === "asc"
+  if (field === "title") {
+    return { short: isAsc ? "A–Z" : "Z–A", long: isAsc ? "A to Z" : "Z to A" }
+  }
+  if (field === "rating") {
+    return { short: isAsc ? "Lowest" : "Highest", long: isAsc ? "lowest first" : "highest first" }
+  }
+  if (field === "release_year") {
+    return { short: isAsc ? "Oldest" : "Newest", long: isAsc ? "oldest release first" : "newest release first" }
+  }
+  return { short: isAsc ? "Oldest" : "Newest", long: isAsc ? "oldest added first" : "newest added first" }
+}
+
+function getAddedTimestamp(item) {
+  const explicitDate = Date.parse(item.created_at || item.createdAt || "")
+  if (Number.isFinite(explicitDate)) return explicitDate
+
+  // MongoDB ObjectIds embed their creation timestamp in the first 8 hex characters.
+  const objectId = String(item._id || "")
+  if (/^[a-f0-9]{24}$/i.test(objectId)) {
+    return parseInt(objectId.slice(0, 8), 16) * 1000
+  }
+
+  return Number(item.order_number) || 0
+}
+
+function compareSortValues(a, b, field) {
+  if (field === "title") {
+    return titleCollator.compare(String(a.title || ""), String(b.title || ""))
+  }
+  if (field === "added") {
+    return getAddedTimestamp(a) - getAddedTimestamp(b)
+  }
+
+  const aValue = Number(a[field]) || 0
+  const bValue = Number(b[field]) || 0
+  return aValue - bValue
+}
+
+function sortMediaItems(items) {
+  const multiplier = sortState.direction === "asc" ? 1 : -1
+  return [...items].sort((a, b) => {
+    const primary = compareSortValues(a, b, sortState.field)
+    if (primary !== 0) return primary * multiplier
+
+    // Deterministic tie-breaker: keep the add order aligned with the chosen direction.
+    const tie = (Number(a.order_number) || 0) - (Number(b.order_number) || 0)
+    return tie * multiplier
+  })
+}
+
+function closeSortMenu() {
+  if (!sortStudio || !sortPopover || !sortMenuBtn) return
+  sortStudio.classList.remove("open")
+  sortPopover.setAttribute("aria-hidden", "true")
+  sortMenuBtn.setAttribute("aria-expanded", "false")
+}
+
+function toggleSortMenu() {
+  if (!sortStudio || !sortPopover || !sortMenuBtn) return
+  const willOpen = !sortStudio.classList.contains("open")
+  sortStudio.classList.toggle("open", willOpen)
+  sortPopover.setAttribute("aria-hidden", String(!willOpen))
+  sortMenuBtn.setAttribute("aria-expanded", String(willOpen))
+}
+
+function setSort(field, requestedDirection = null) {
+  if (!SORT_FIELDS.has(field)) return
+
+  const direction = requestedDirection
+    ? (requestedDirection === "asc" ? "asc" : "desc")
+    : sortState.field === field
+      ? (sortState.direction === "asc" ? "desc" : "asc")
+      : defaultSortDirection(field)
+
+  sortState = { field, direction }
+  saveSortState()
+  updateSortUI()
+  closeSortMenu()
+
+  if (currentResults.length) {
+    updateResultsTable(sortMediaItems(currentResults))
+  }
+}
+
+function updateSortUI() {
+  const directionCopy = getSortDirectionCopy()
+  if (sortCurrentLabel) sortCurrentLabel.textContent = getSortFieldLabel()
+  if (sortDirectionShort) sortDirectionShort.textContent = directionCopy.short
+
+  if (sortDirectionIcon) {
+    sortDirectionIcon.className = "fas"
+    if (sortState.field === "title") {
+      sortDirectionIcon.classList.add(sortState.direction === "asc" ? "fa-arrow-down-a-z" : "fa-arrow-down-z-a")
+    } else {
+      sortDirectionIcon.classList.add(sortState.direction === "asc" ? "fa-arrow-up-short-wide" : "fa-arrow-down-wide-short")
+    }
+  }
+
+  if (sortDirectionBtn) {
+    sortDirectionBtn.title = `Reverse order — currently ${directionCopy.long}`
+    sortDirectionBtn.setAttribute("aria-label", `Reverse order. Currently ${directionCopy.long}`)
+  }
+
+  document.querySelectorAll(".sort-option").forEach(option => {
+    const active = option.dataset.sortField === sortState.field
+    option.classList.toggle("active", active)
+    option.setAttribute("aria-checked", String(active))
+  })
+
+  document.querySelectorAll(".sort-th").forEach(th => {
+    const active = th.dataset.sortField === sortState.field
+    th.classList.toggle("active-sort", active)
+    th.setAttribute("aria-sort", active
+      ? (sortState.direction === "asc" ? "ascending" : "descending")
+      : "none")
+
+    const icon = th.querySelector(".table-sort-icon")
+    if (icon) {
+      icon.className = "fas table-sort-icon"
+      icon.classList.add(active
+        ? (sortState.direction === "asc" ? "fa-arrow-up" : "fa-arrow-down")
+        : "fa-sort")
+    }
+  })
+}
+
+function bindSortControls() {
+  sortMenuBtn?.addEventListener("click", event => {
+    event.stopPropagation()
+    toggleSortMenu()
+  })
+
+  sortDirectionBtn?.addEventListener("click", event => {
+    event.stopPropagation()
+    setSort(sortState.field, sortState.direction === "asc" ? "desc" : "asc")
+  })
+
+  document.querySelectorAll(".sort-option").forEach(option => {
+    option.addEventListener("click", () => setSort(option.dataset.sortField))
+  })
+
+  document.querySelectorAll(".table-sort-btn").forEach(button => {
+    button.addEventListener("click", () => setSort(button.dataset.sortField))
+  })
+
+  document.addEventListener("click", event => {
+    if (sortStudio && !sortStudio.contains(event.target)) closeSortMenu()
+  })
+
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") closeSortMenu()
+  })
+}
+
 // ════════════════════════════════════════════════
 //  SEARCH & DISPLAY
 // ════════════════════════════════════════════════
@@ -415,8 +627,8 @@ async function searchMedia() {
       return true
     })
 
-    results = results
-      .map(item => ({
+    results = sortMediaItems(
+      results.map(item => ({
         ...item,
         display_year: item.media_type === "movie"
           ? item.release_year?.toString() || ""
@@ -424,7 +636,7 @@ async function searchMedia() {
             ? item.release_year?.toString() || ""
             : `${item.release_year || ""}–${item.end_year || ""}`,
       }))
-      .sort((a, b) => (a.order_number || 0) - (b.order_number || 0))
+    )
 
     updateResultsTable(results)
 
@@ -444,19 +656,20 @@ function updateResultsTable(results) {
     row.innerHTML = `
       <td><input type="checkbox" class="chk" onclick="toggleRowSelection(this)"></td>
       <td>${item.order_number}</td>
-      <td>${item.title}</td>
-      <td>${item.genre}</td>
-      <td>${item.display_year}</td>
+      <td title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</td>
+      <td>${escapeHtml(item.genre)}</td>
+      <td>${escapeHtml(item.display_year)}</td>
       <td>${rating.toFixed(1)}</td>
-      <td>${item.media_type}</td>
+      <td>${escapeHtml(item.media_type)}</td>
     `
     resultsBody.appendChild(row)
   })
 
   // Status
   if (statusLabel) {
+    const directionCopy = getSortDirectionCopy()
     statusLabel.textContent = results.length > 0
-      ? `${results.length} title${results.length !== 1 ? "s" : ""} in collection`
+      ? `${results.length} title${results.length !== 1 ? "s" : ""} · ${getSortFieldLabel()}, ${directionCopy.long}`
       : "No results found"
   }
 
@@ -490,6 +703,7 @@ function buildMediaCard(item, index) {
   const card = document.createElement("div")
   card.className = "media-card"
   card.dataset.index = index
+  card.style.setProperty("--card-i", index % 12)
 
   const statusDotMap = {
     watched: "#4caf50", watching: "#2196f3",
@@ -557,6 +771,7 @@ function updateCardGrid(results) {
   // Teardown old observer
   _cardObserver?.disconnect()
   _cardObserver = null
+  grid.classList.remove("is-reordering")
   grid.innerHTML = ""
   _cardPool = results
   _cardRendered = 0
@@ -576,6 +791,12 @@ function updateCardGrid(results) {
     }, { rootMargin: "300px" })
     _cardObserver.observe(sentinel)
   }
+
+  // A subtle staggered "reel shuffle" makes sorting in Grid View feel intentional.
+  requestAnimationFrame(() => {
+    grid.classList.add("is-reordering")
+    window.setTimeout(() => grid.classList.remove("is-reordering"), 720)
+  })
 }
 
 function toggleCardSelection(checkbox, index) {
