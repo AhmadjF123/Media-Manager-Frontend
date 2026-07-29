@@ -1157,6 +1157,8 @@ function switchView(view) {
     navCol.classList.add("active")
     navAdd.classList.remove("active")
   } else {
+    // Always start Add New with Personal Notes collapsed.
+    addView.querySelector(".personal-section")?.classList.remove("personal-section--open")
     colView.style.display = "none"
     addView.style.display = "block"
     navCol.classList.remove("active")
@@ -1258,7 +1260,7 @@ async function addMedia(e) {
 
 function clearForm() {
   addForm.reset()
-  document.querySelector("#view-add .personal-section")?.classList.add("personal-section--open")
+  document.querySelector("#view-add .personal-section")?.classList.remove("personal-section--open")
   posterImage.src = ""
   posterImage.style.display = "none"
   posterPlaceholder.style.display = "flex"
