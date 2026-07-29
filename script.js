@@ -781,7 +781,7 @@ function buildMediaCard(item, index) {
     </div>
     <div class="card-body">
       <div class="card-title-text" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
-      <div class="card-meta-text">${escapeHtml(item.genre)} · ${item.display_year}</div>
+      <div class="card-meta-text">${escapeHtml(item.genre)}</div>
     </div>
   `
 
