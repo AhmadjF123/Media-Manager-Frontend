@@ -558,7 +558,7 @@ body {
 /* Card checkbox */
 .card-chk-wrap {
   position: absolute;
-  top: 10px; left: 10px;
+  top: 43px; left: 10px;
   z-index: 5;
   opacity: 0;
   transition: opacity var(--transition);
@@ -609,8 +609,42 @@ body {
   background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 50%);
 }
 
+.card-top-badges {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-year-badge,
 .card-rating-badge {
-  align-self: flex-end;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+  box-shadow: 0 5px 16px rgba(0,0,0,0.22);
+}
+
+.card-year-badge {
+  min-width: 46px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,0.24);
+  background: rgba(10,10,18,0.68);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+
+.card-rating-badge {
+  align-self: auto;
   padding: 3px 9px;
   border-radius: 20px;
   border: 1px solid;
@@ -2324,6 +2358,16 @@ body.light-theme .sk-shine {
   );
 }
 
+/* Year badge placeholder (top left) */
+.sk-year-badge {
+  position: absolute;
+  top: 10px; left: 10px;
+  width: 52px; height: 20px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.1);
+}
+body.light-theme .sk-year-badge { background: rgba(0,0,0,0.1); }
+
 /* Rating badge placeholder (top right) */
 .sk-rating-badge {
   position: absolute;
@@ -2752,7 +2796,7 @@ body.light-theme .fav-toggle input:checked + .fav-toggle-track {
 
 .card-fav-badge {
   position: absolute;
-  top: 9px;
+  top: 42px;
   right: 9px;
   width: 26px; height: 26px;
   border-radius: 50%;

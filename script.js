@@ -130,6 +130,7 @@ function showSkeletons(count = 16) {
     sk.innerHTML = `
       <div class="sk-poster">
         <div class="sk-shine"></div>
+        <div class="sk-year-badge"></div>
         <div class="sk-rating-badge"></div>
         <div class="sk-type-chip"></div>
       </div>
@@ -738,6 +739,7 @@ const CARD_BATCH = 40
 function buildMediaCard(item, index) {
   const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0
   const ratingColor = rating >= 8 ? "#4caf50" : rating >= 6 ? "#d4a843" : "#e53935"
+  const displayYear = String(item.release_year || item.display_year || "—")
   const hasPoster = item.poster_url && item.poster_url.startsWith("http")
   const typeLabel = item.media_type === "movie" ? "🎬 Movie" : "📺 Series"
 
@@ -766,8 +768,11 @@ function buildMediaCard(item, index) {
         : `<div class="card-poster-ph"><i class="fas fa-${item.media_type === "movie" ? "film" : "tv"}"></i></div>`
       }
       <div class="card-overlay">
-        <div class="card-rating-badge" style="background:${ratingColor}22;color:${ratingColor};border-color:${ratingColor}55;">
-          ★ ${rating.toFixed(1)}
+        <div class="card-top-badges">
+          <div class="card-year-badge" title="Release year">${escapeHtml(displayYear)}</div>
+          <div class="card-rating-badge" style="background:${ratingColor}22;color:${ratingColor};border-color:${ratingColor}55;">
+            ★ ${rating.toFixed(1)}
+          </div>
         </div>
         <div class="card-type-chip ${item.media_type}">${typeLabel}</div>
       </div>
