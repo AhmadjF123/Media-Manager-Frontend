@@ -493,9 +493,42 @@ function sortMediaItems(items) {
   })
 }
 
+function positionSortPopover() {
+  if (!sortStudio || !sortPopover) return
+
+  const viewportPadding = 12
+  const gap = 10
+  const studioRect = sortStudio.getBoundingClientRect()
+  const width = Math.min(354, Math.max(260, window.innerWidth - viewportPadding * 2))
+  const left = Math.min(
+    Math.max(studioRect.left, viewportPadding),
+    Math.max(viewportPadding, window.innerWidth - width - viewportPadding)
+  )
+
+  // Measure at the final width so the placement also works on narrow screens.
+  sortPopover.style.setProperty("--sort-popover-width", `${width}px`)
+  sortPopover.style.setProperty("--sort-popover-left", `${Math.round(left)}px`)
+  sortPopover.style.setProperty("--sort-popover-max-height", `${Math.max(160, window.innerHeight - viewportPadding * 2)}px`)
+
+  const naturalHeight = Math.min(sortPopover.scrollHeight, window.innerHeight - viewportPadding * 2)
+  const roomBelow = window.innerHeight - studioRect.bottom - gap - viewportPadding
+  const roomAbove = studioRect.top - gap - viewportPadding
+  const placeAbove = roomBelow < naturalHeight && roomAbove > roomBelow
+  const availableRoom = Math.max(120, placeAbove ? roomAbove : roomBelow)
+  const renderedHeight = Math.min(naturalHeight, availableRoom)
+  const top = placeAbove
+    ? Math.max(viewportPadding, studioRect.top - gap - renderedHeight)
+    : Math.min(window.innerHeight - viewportPadding - renderedHeight, studioRect.bottom + gap)
+
+  sortPopover.style.setProperty("--sort-popover-top", `${Math.round(top)}px`)
+  sortPopover.style.setProperty("--sort-popover-max-height", `${Math.round(availableRoom)}px`)
+  sortPopover.style.setProperty("--sort-popover-origin", placeAbove ? "bottom left" : "top left")
+}
+
 function closeSortMenu() {
   if (!sortStudio || !sortPopover || !sortMenuBtn) return
   sortStudio.classList.remove("open")
+  sortStudio.closest(".toolbar")?.classList.remove("sort-menu-open")
   sortPopover.setAttribute("aria-hidden", "true")
   sortMenuBtn.setAttribute("aria-expanded", "false")
 }
@@ -503,7 +536,9 @@ function closeSortMenu() {
 function toggleSortMenu() {
   if (!sortStudio || !sortPopover || !sortMenuBtn) return
   const willOpen = !sortStudio.classList.contains("open")
+  if (willOpen) positionSortPopover()
   sortStudio.classList.toggle("open", willOpen)
+  sortStudio.closest(".toolbar")?.classList.toggle("sort-menu-open", willOpen)
   sortPopover.setAttribute("aria-hidden", String(!willOpen))
   sortMenuBtn.setAttribute("aria-expanded", String(willOpen))
 }
@@ -591,6 +626,12 @@ function bindSortControls() {
   document.addEventListener("click", event => {
     if (sortStudio && !sortStudio.contains(event.target)) closeSortMenu()
   })
+
+  const keepSortPopoverAnchored = () => {
+    if (sortStudio?.classList.contains("open")) positionSortPopover()
+  }
+  window.addEventListener("resize", keepSortPopoverAnchored, { passive: true })
+  window.addEventListener("scroll", keepSortPopoverAnchored, { passive: true, capture: true })
 
   document.addEventListener("keydown", event => {
     if (event.key === "Escape") closeSortMenu()
