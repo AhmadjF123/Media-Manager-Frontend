@@ -34,6 +34,14 @@ const searchInput       = document.getElementById("search-input")
 const searchBySelect    = document.getElementById("search-by")
 const filterTypeSelect  = document.getElementById("filter-type")
 const searchBtn         = document.getElementById("search-btn")
+const actorSearchPanel  = document.getElementById("actor-search-panel")
+const actorSuggestions  = document.getElementById("actor-suggestions")
+const actorMatchBanner  = document.getElementById("actor-match-banner")
+const actorMatchPhoto   = document.getElementById("actor-match-photo")
+const actorMatchName    = document.getElementById("actor-match-name")
+const actorMatchMeta    = document.getElementById("actor-match-meta")
+const actorMatchTotal   = document.getElementById("actor-match-total")
+const actorClearBtn     = document.getElementById("actor-clear-btn")
 const resultsTable      = document.getElementById("results-table")
 const resultsBody       = document.getElementById("results-body")
 const statusLabel       = document.getElementById("status-label")
@@ -96,6 +104,17 @@ const editNotesInput        = document.getElementById("edit-notes")
 // ── Global state ──
 let currentResults  = []
 let currentGridMode = 'grid'
+
+// ── Actor search state ──
+const actorSearchState = {
+  selected: null,
+  suggestions: [],
+  requestSerial: 0,
+  debounceTimer: null,
+  busy: false,
+}
+const _actorPeopleCache  = new Map()
+const _actorCreditsCache = new Map()
 
 // ── Sorting state ──
 const SORT_STORAGE_KEY = "cinema_sort_preference"
@@ -297,6 +316,16 @@ async function init() {
   // Event listeners
   searchBtn.addEventListener("click", searchMedia)
   searchInput.addEventListener("keypress", e => { if(e.key==="Enter") searchMedia() })
+  searchInput.addEventListener("input", handleCollectionSearchInput)
+  searchBySelect.addEventListener("change", handleSearchModeChange)
+  filterTypeSelect.addEventListener("change", searchMedia)
+  actorClearBtn?.addEventListener("click", clearActorSearch)
+  document.addEventListener("click", event => {
+    if (actorSearchPanel && !actorSearchPanel.contains(event.target) && event.target !== searchInput) {
+      hideActorSuggestions()
+    }
+  })
+  syncSearchModeUI()
   selectAllCheckbox && selectAllCheckbox.addEventListener("change", toggleSelectAll)
   editBtn.addEventListener("click", editSelected)
   deleteBtn.addEventListener("click", deleteSelected)
@@ -648,6 +677,16 @@ async function searchMedia() {
   const searchBy       = searchBySelect.value
   const filterType     = filterTypeSelect.value
 
+  // Actor mode uses TMDB cast credits, then intersects them with the user's own vault.
+  if (searchBy === "actor") {
+    await searchCollectionByActor(rawSearchQuery, filterType)
+    return
+  }
+
+  setActorSearchBusy(false)
+  hideActorSuggestions()
+  hideActorMatchBanner()
+
   // Make dotted/file-style title searches match normal titles in the collection.
   // Example: "How.To.Train.Your.Dragon" → "How To Train Your Dragon"
   const searchQuery = searchBy === "title"
@@ -682,23 +721,414 @@ async function searchMedia() {
       return true
     })
 
-    results = sortMediaItems(
-      results.map(item => ({
-        ...item,
-        display_year: item.media_type === "movie"
-          ? item.release_year?.toString() || ""
-          : item.release_year === item.end_year
-            ? item.release_year?.toString() || ""
-            : `${item.release_year || ""}–${item.end_year || ""}`,
-      }))
-    )
-
+    results = prepareDisplayResults(results)
     updateResultsTable(results)
 
   } catch(error) {
     showToast("Error searching media: " + error.message, "error")
   }
 }
+
+function prepareDisplayResults(results) {
+  return sortMediaItems(
+    results.map(item => ({
+      ...item,
+      display_year: item.media_type === "movie"
+        ? item.release_year?.toString() || ""
+        : item.release_year === item.end_year
+          ? item.release_year?.toString() || ""
+          : `${item.release_year || ""}–${item.end_year || ""}`,
+    }))
+  )
+}
+
+function syncSearchModeUI() {
+  const isActorMode = searchBySelect.value === "actor"
+  actorSearchPanel.hidden = !isActorMode
+  searchInput.placeholder = isActorMode
+    ? "Search an actor — e.g. Cillian Murphy"
+    : "Search your vault…"
+
+  const icon = document.querySelector(".search-ico")
+  if (icon) {
+    icon.className = isActorMode
+      ? "fas fa-user-magnifying-glass search-ico"
+      : "fas fa-search search-ico"
+  }
+
+  document.querySelector(".search-wrap")?.classList.toggle("actor-mode", isActorMode)
+}
+
+function handleSearchModeChange() {
+  window.clearTimeout(actorSearchState.debounceTimer)
+  actorSearchState.requestSerial += 1
+  actorSearchState.selected = null
+  searchInput.value = ""
+  hideActorSuggestions()
+  hideActorMatchBanner()
+  syncSearchModeUI()
+  searchMedia()
+  searchInput.focus()
+}
+
+function handleCollectionSearchInput() {
+  if (searchBySelect.value !== "actor") return
+
+  const cleaned = normalizeMediaSearchTitle(searchInput.value)
+  if (actorSearchState.selected && cleaned.toLowerCase() !== actorSearchState.selected.name.toLowerCase()) {
+    actorSearchState.selected = null
+    hideActorMatchBanner()
+  }
+
+  window.clearTimeout(actorSearchState.debounceTimer)
+  if (cleaned.length < 2) {
+    actorSearchState.requestSerial += 1
+    hideActorSuggestions()
+    return
+  }
+
+  actorSearchState.debounceTimer = window.setTimeout(() => loadActorSuggestions(cleaned), 280)
+}
+
+async function searchPeopleByName(query) {
+  const cleaned = normalizeMediaSearchTitle(query)
+  const cacheKey = cleaned.toLowerCase()
+  if (_actorPeopleCache.has(cacheKey)) return _actorPeopleCache.get(cacheKey)
+
+  const response = await fetch(
+    `${TMDB_BASE_URL}/search/person?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleaned)}&language=en-US&include_adult=false&page=1`
+  )
+  if (!response.ok) throw new Error("Could not search actors right now")
+  const data = await response.json()
+  const people = (data.results || [])
+    .filter(person => person?.id && person?.name)
+    .slice(0, 7)
+  _actorPeopleCache.set(cacheKey, people)
+  return people
+}
+
+async function loadActorSuggestions(query) {
+  const serial = ++actorSearchState.requestSerial
+  showActorSuggestionsLoading()
+
+  try {
+    const people = await searchPeopleByName(query)
+    if (serial !== actorSearchState.requestSerial || searchBySelect.value !== "actor") return
+    actorSearchState.suggestions = people
+    renderActorSuggestions(people, query)
+  } catch (error) {
+    if (serial !== actorSearchState.requestSerial) return
+    renderActorSuggestionsError(error.message)
+  }
+}
+
+function getActorKnownFor(person) {
+  return (person.known_for || [])
+    .map(work => work.title || work.name)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(" · ")
+}
+
+function renderActorSuggestions(people, query) {
+  if (!actorSuggestions) return
+  actorSuggestions.hidden = false
+
+  if (!people.length) {
+    actorSuggestions.innerHTML = `
+      <div class="actor-suggestion-empty">
+        <i class="fas fa-user-slash"></i>
+        <div><strong>No actor found</strong><span>Try a different spelling for “${escapeHtml(query)}”.</span></div>
+      </div>`
+    return
+  }
+
+  actorSuggestions.innerHTML = `
+    <div class="actor-suggestions-head">
+      <span><i class="fas fa-sparkles"></i> Choose the right performer</span>
+      <small>${people.length} match${people.length === 1 ? "" : "es"}</small>
+    </div>
+    <div class="actor-suggestions-grid">
+      ${people.map((person, index) => {
+        const knownFor = getActorKnownFor(person) || person.known_for_department || "Film & television"
+        const photo = person.profile_path
+          ? `<img src="${TMDB_IMAGE_URL}${person.profile_path}" alt="" loading="lazy">`
+          : `<span class="actor-suggestion-ph"><i class="fas fa-user"></i></span>`
+        return `
+          <button type="button" class="actor-suggestion-card" data-actor-index="${index}" role="option">
+            <span class="actor-suggestion-photo">${photo}</span>
+            <span class="actor-suggestion-copy">
+              <strong>${escapeHtml(person.name)}</strong>
+              <small>${escapeHtml(knownFor)}</small>
+            </span>
+            <i class="fas fa-chevron-right"></i>
+          </button>`
+      }).join("")}
+    </div>`
+
+  actorSuggestions.querySelectorAll(".actor-suggestion-card").forEach(button => {
+    button.addEventListener("click", () => {
+      const person = people[Number(button.dataset.actorIndex)]
+      if (person) selectActorSuggestion(person)
+    })
+  })
+}
+
+function showActorSuggestionsLoading() {
+  if (!actorSuggestions) return
+  actorSuggestions.hidden = false
+  actorSuggestions.innerHTML = `
+    <div class="actor-suggestion-loading">
+      <span class="actor-loading-orbit"><i class="fas fa-user"></i></span>
+      <div><strong>Searching the cast index…</strong><span>Finding the best performer matches</span></div>
+    </div>`
+}
+
+function renderActorSuggestionsError(message) {
+  if (!actorSuggestions) return
+  actorSuggestions.hidden = false
+  actorSuggestions.innerHTML = `
+    <div class="actor-suggestion-empty error">
+      <i class="fas fa-triangle-exclamation"></i>
+      <div><strong>Cast search unavailable</strong><span>${escapeHtml(message)}</span></div>
+    </div>`
+}
+
+function hideActorSuggestions() {
+  if (!actorSuggestions) return
+  actorSuggestions.hidden = true
+  actorSuggestions.innerHTML = ""
+}
+
+function selectActorSuggestion(person) {
+  actorSearchState.selected = person
+  searchInput.value = person.name
+  hideActorSuggestions()
+  renderActorMatchBanner(person, { loading: true })
+  searchMedia()
+}
+
+async function fetchActorCredits(personId) {
+  if (_actorCreditsCache.has(personId)) return _actorCreditsCache.get(personId)
+
+  const response = await fetch(
+    `${TMDB_BASE_URL}/person/${personId}/combined_credits?api_key=${TMDB_API_KEY}&language=en-US`
+  )
+  if (!response.ok) throw new Error("Could not load this actor's filmography")
+  const data = await response.json()
+  const castCredits = (data.cast || []).filter(credit => credit.media_type === "movie" || credit.media_type === "tv")
+  _actorCreditsCache.set(personId, castCredits)
+  return castCredits
+}
+
+function normalizeCreditTitle(value) {
+  return normalizeMediaSearchTitle(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/&/g, " and ")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
+}
+
+function getCreditYear(credit) {
+  const date = credit.release_date || credit.first_air_date || ""
+  const year = parseInt(String(date).slice(0, 4))
+  return Number.isFinite(year) ? year : 0
+}
+
+function buildActorCreditIndex(credits) {
+  const index = new Map()
+
+  credits.forEach(credit => {
+    const type = credit.media_type === "tv" ? "series" : "movie"
+    const names = [credit.title, credit.original_title, credit.name, credit.original_name]
+      .filter(Boolean)
+
+    names.forEach(name => {
+      const normalized = normalizeCreditTitle(name)
+      if (!normalized) return
+      const key = `${type}|${normalized}`
+      if (!index.has(key)) index.set(key, [])
+      index.get(key).push(credit)
+    })
+  })
+
+  return index
+}
+
+function chooseBestActorCredit(item, candidates) {
+  if (!candidates?.length) return null
+  const itemYear = parseInt(item.release_year) || 0
+
+  if (itemYear) {
+    const exactYear = candidates.find(credit => getCreditYear(credit) === itemYear)
+    if (exactYear) return exactYear
+
+    const closeYear = candidates.find(credit => {
+      const creditYear = getCreditYear(credit)
+      return creditYear && Math.abs(creditYear - itemYear) <= 1
+    })
+    if (closeYear) return closeYear
+  }
+
+  return candidates[0]
+}
+
+function matchCollectionToActorCredits(collection, credits, filterType, actor) {
+  const creditIndex = buildActorCreditIndex(credits)
+
+  return collection.flatMap(item => {
+    if (filterType !== "all" && item.media_type !== filterType) return []
+
+    const key = `${item.media_type}|${normalizeCreditTitle(item.title)}`
+    const credit = chooseBestActorCredit(item, creditIndex.get(key))
+    if (!credit) return []
+
+    return [{
+      ...item,
+      _actorMatch: {
+        actorName: actor.name,
+        character: String(credit.character || "").trim(),
+        episodeCount: parseInt(credit.episode_count) || 0,
+      },
+    }]
+  })
+}
+
+async function resolveActorForSearch(query) {
+  const cleaned = normalizeMediaSearchTitle(query)
+  if (!cleaned) return null
+
+  const selected = actorSearchState.selected
+  if (selected && selected.name.toLowerCase() === cleaned.toLowerCase()) return selected
+
+  const people = await searchPeopleByName(cleaned)
+  if (!people.length) return null
+
+  const exact = people.find(person => person.name.toLowerCase() === cleaned.toLowerCase())
+  return exact || people[0]
+}
+
+async function searchCollectionByActor(rawQuery, filterType) {
+  window.clearTimeout(actorSearchState.debounceTimer)
+  const serial = ++actorSearchState.requestSerial
+  const query = normalizeMediaSearchTitle(rawQuery)
+  if (query !== rawQuery) searchInput.value = query
+  hideActorSuggestions()
+
+  if (!query) {
+    setActorSearchBusy(false)
+    actorSearchState.selected = null
+    hideActorMatchBanner()
+    const all = await fetchAllMedia()
+    if (serial !== actorSearchState.requestSerial) return
+    updateResultsTable(prepareDisplayResults(
+      all.filter(item => filterType === "all" || item.media_type === filterType)
+    ))
+    return
+  }
+
+  setActorSearchBusy(true)
+  try {
+    const actor = await resolveActorForSearch(query)
+    if (serial !== actorSearchState.requestSerial || searchBySelect.value !== "actor") return
+
+    if (!actor) {
+      actorSearchState.selected = null
+      hideActorMatchBanner()
+      updateResultsTable([])
+      showToast(`No actor found for “${query}”`, "info")
+      return
+    }
+
+    actorSearchState.selected = actor
+    searchInput.value = actor.name
+    renderActorMatchBanner(actor, { loading: true })
+
+    const [collection, credits] = await Promise.all([
+      fetchAllMedia(),
+      fetchActorCredits(actor.id),
+    ])
+    if (serial !== actorSearchState.requestSerial || searchBySelect.value !== "actor") return
+
+    const results = prepareDisplayResults(
+      matchCollectionToActorCredits(collection, credits, filterType, actor)
+    )
+
+    renderActorMatchBanner(actor, { count: results.length, creditsCount: credits.length })
+    updateResultsTable(results)
+  } catch (error) {
+    if (serial !== actorSearchState.requestSerial) return
+    renderActorMatchBanner(actorSearchState.selected, { error: error.message })
+    showToast("Actor search error: " + error.message, "error")
+  } finally {
+    if (serial === actorSearchState.requestSerial) setActorSearchBusy(false)
+  }
+}
+
+function renderActorMatchBanner(actor, options = {}) {
+  if (!actor || !actorMatchBanner) return
+  actorMatchBanner.hidden = false
+  actorMatchBanner.classList.toggle("is-loading", Boolean(options.loading))
+  actorMatchBanner.classList.toggle("has-error", Boolean(options.error))
+
+  actorMatchName.textContent = actor.name
+  actorMatchTotal.textContent = options.loading ? "…" : String(options.count ?? 0)
+
+  if (options.error) {
+    actorMatchMeta.textContent = options.error
+  } else if (options.loading) {
+    actorMatchMeta.textContent = "Scanning movies and series in your collection…"
+  } else {
+    const department = actor.known_for_department || "Acting"
+    actorMatchMeta.textContent = `${department} · ${options.creditsCount || 0} cast credits checked`
+  }
+
+  if (actor.profile_path) {
+    actorMatchPhoto.innerHTML = `<img src="${TMDB_IMAGE_URL}${actor.profile_path}" alt="${escapeHtml(actor.name)}">`
+  } else {
+    actorMatchPhoto.innerHTML = `<i class="fas fa-user"></i>`
+  }
+}
+
+function hideActorMatchBanner() {
+  if (!actorMatchBanner) return
+  actorMatchBanner.hidden = true
+  actorMatchBanner.classList.remove("is-loading", "has-error")
+}
+
+function setActorSearchBusy(busy) {
+  actorSearchState.busy = busy
+  searchBtn.disabled = busy
+  searchBtn.classList.toggle("is-loading", busy)
+  searchBtn.innerHTML = busy
+    ? `<i class="fas fa-circle-notch fa-spin"></i>`
+    : `<i class="fas fa-arrow-right"></i>`
+}
+
+function clearActorSearch() {
+  actorSearchState.requestSerial += 1
+  actorSearchState.selected = null
+  window.clearTimeout(actorSearchState.debounceTimer)
+  searchInput.value = ""
+  hideActorSuggestions()
+  hideActorMatchBanner()
+  searchMedia()
+  searchInput.focus()
+}
+window.clearActorSearch = clearActorSearch
+
+function clearCollectionSearch() {
+  searchInput.value = ""
+  actorSearchState.selected = null
+  hideActorSuggestions()
+  hideActorMatchBanner()
+  searchMedia()
+  searchInput.focus()
+}
+window.clearCollectionSearch = clearCollectionSearch
 
 function updateResultsTable(results) {
   currentResults = results
@@ -711,7 +1141,10 @@ function updateResultsTable(results) {
     row.innerHTML = `
       <td><input type="checkbox" class="chk" onclick="toggleRowSelection(this)"></td>
       <td>${item.order_number}</td>
-      <td title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</td>
+      <td title="${escapeHtml(item.title)}">
+        <span class="table-title-main">${escapeHtml(item.title)}</span>
+        ${item._actorMatch ? `<span class="table-actor-role"><i class="fas fa-masks-theater"></i> ${escapeHtml(item._actorMatch.character || "Cast member")}</span>` : ""}
+      </td>
       <td>${escapeHtml(item.genre)}</td>
       <td>${escapeHtml(item.display_year)}</td>
       <td>${rating.toFixed(1)}</td>
@@ -723,9 +1156,14 @@ function updateResultsTable(results) {
   // Status
   if (statusLabel) {
     const directionCopy = getSortDirectionCopy()
+    const actor = searchBySelect.value === "actor" ? actorSearchState.selected : null
     statusLabel.textContent = results.length > 0
-      ? `${results.length} title${results.length !== 1 ? "s" : ""} · ${getSortFieldLabel()}, ${directionCopy.long}`
-      : "No results found"
+      ? actor
+        ? `${results.length} title${results.length !== 1 ? "s" : ""} featuring ${actor.name} · ${getSortFieldLabel()}, ${directionCopy.long}`
+        : `${results.length} title${results.length !== 1 ? "s" : ""} · ${getSortFieldLabel()}, ${directionCopy.long}`
+      : actor
+        ? `No titles featuring ${actor.name} in your vault`
+        : "No results found"
   }
 
   // ── Card grid ──
@@ -736,7 +1174,47 @@ function updateResultsTable(results) {
 
   // ── Empty state ──
   const empty = document.getElementById("empty-state")
-  if (empty) empty.style.display = results.length === 0 ? "flex" : "none"
+  if (empty) {
+    empty.style.display = results.length === 0 ? "flex" : "none"
+    updateEmptyStateCopy(results)
+  }
+}
+
+function updateEmptyStateCopy(results) {
+  if (results.length) return
+
+  const title = document.getElementById("empty-title")
+  const copy = document.getElementById("empty-copy")
+  const action = document.getElementById("empty-action")
+  const actionLabel = document.getElementById("empty-action-label")
+  if (!title || !copy || !action || !actionLabel) return
+
+  const query = searchInput.value.trim()
+  const actor = searchBySelect.value === "actor" ? actorSearchState.selected : null
+
+  if (actor) {
+    title.textContent = `No ${actor.name} titles yet`
+    copy.textContent = `This performer has no matching movie or series in your current collection.`
+    action.setAttribute("onclick", "clearActorSearch()")
+    action.querySelector("i").className = "fas fa-rotate-left"
+    actionLabel.textContent = "Back to Full Collection"
+    return
+  }
+
+  if (query) {
+    title.textContent = "No matching titles"
+    copy.textContent = "Try another phrase or clear the search to see your complete vault."
+    action.setAttribute("onclick", "clearCollectionSearch()")
+    action.querySelector("i").className = "fas fa-xmark"
+    actionLabel.textContent = "Clear Search"
+    return
+  }
+
+  title.textContent = "Your vault is empty"
+  copy.textContent = "Add your first movie or series to get started."
+  action.setAttribute("onclick", "switchView('add')")
+  action.querySelector("i").className = "fas fa-plus"
+  actionLabel.textContent = "Add Something"
 }
 
 // ════════════════════════════════════════════════
@@ -794,6 +1272,11 @@ function buildMediaCard(item, index) {
     </div>
     <div class="card-body">
       <div class="card-title-text" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
+      ${item._actorMatch ? `
+        <div class="card-actor-role" title="${escapeHtml(item._actorMatch.actorName)} as ${escapeHtml(item._actorMatch.character || "Cast member")}">
+          <i class="fas fa-masks-theater"></i>
+          <span>${escapeHtml(item._actorMatch.character || "Cast member")}</span>
+        </div>` : ""}
       <div class="card-meta-text">${escapeHtml(item.genre)}</div>
     </div>
   `

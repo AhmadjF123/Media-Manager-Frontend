@@ -145,6 +145,7 @@
             />
             <select id="search-by" class="sel-chip">
               <option value="title">Title</option>
+              <option value="actor">Actor</option>
               <option value="release_year">Year</option>
               <option value="genre">Genre</option>
               <option value="rating">Rating</option>
@@ -157,6 +158,42 @@
             <button id="search-btn" class="search-go">
               <i class="fas fa-arrow-right"></i>
             </button>
+          </div>
+
+          <!-- Actor search experience (shown only when Search by = Actor) -->
+          <div id="actor-search-panel" class="actor-search-panel" hidden>
+            <div class="actor-search-intro">
+              <div class="actor-orbit" aria-hidden="true">
+                <span class="actor-orbit-ring"></span>
+                <i class="fas fa-user-group"></i>
+              </div>
+              <div class="actor-search-copy">
+                <span class="actor-kicker">Cast Explorer</span>
+                <strong>Search your collection by performer</strong>
+                <small>Choose an actor and the vault will reveal every matching movie and series.</small>
+              </div>
+              <span class="actor-tmdb-pill"><i class="fas fa-wand-magic-sparkles"></i> Smart cast match</span>
+            </div>
+
+            <div id="actor-suggestions" class="actor-suggestions" role="listbox" aria-label="Actor suggestions" hidden></div>
+
+            <div id="actor-match-banner" class="actor-match-banner" hidden>
+              <div id="actor-match-photo" class="actor-match-photo" aria-hidden="true">
+                <i class="fas fa-user"></i>
+              </div>
+              <div class="actor-match-copy">
+                <span class="actor-spotlight-label"><i class="fas fa-clapperboard"></i> Cast spotlight</span>
+                <h3 id="actor-match-name">Actor</h3>
+                <p id="actor-match-meta">Searching filmography…</p>
+              </div>
+              <div class="actor-match-count" aria-live="polite">
+                <strong id="actor-match-total">—</strong>
+                <span>titles in your vault</span>
+              </div>
+              <button type="button" id="actor-clear-btn" class="actor-clear-btn" title="Clear actor search" aria-label="Clear actor search">
+                <i class="fas fa-xmark"></i>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -320,10 +357,10 @@
         <!-- Empty state -->
         <div id="empty-state" class="empty-state" style="display: none">
           <div class="empty-reel"><i class="fas fa-film"></i></div>
-          <h3>Your vault is empty</h3>
-          <p>Add your first movie or series to get started.</p>
-          <button class="gold-btn" onclick="switchView('add')">
-            <i class="fas fa-plus"></i> Add Something
+          <h3 id="empty-title">Your vault is empty</h3>
+          <p id="empty-copy">Add your first movie or series to get started.</p>
+          <button id="empty-action" class="gold-btn" onclick="switchView('add')">
+            <i class="fas fa-plus"></i> <span id="empty-action-label">Add Something</span>
           </button>
         </div>
       </section>
