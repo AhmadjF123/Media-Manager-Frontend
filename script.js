@@ -644,9 +644,19 @@ function bindSortControls() {
 // ════════════════════════════════════════════════
 
 async function searchMedia() {
-  const searchQuery = searchInput.value.trim().toLowerCase()
-  const searchBy    = searchBySelect.value
-  const filterType  = filterTypeSelect.value
+  const rawSearchQuery = searchInput.value.trim()
+  const searchBy       = searchBySelect.value
+  const filterType     = filterTypeSelect.value
+
+  // Make dotted/file-style title searches match normal titles in the collection.
+  // Example: "How.To.Train.Your.Dragon" → "How To Train Your Dragon"
+  const searchQuery = searchBy === "title"
+    ? normalizeMediaSearchTitle(rawSearchQuery).toLowerCase()
+    : rawSearchQuery.toLowerCase()
+
+  if (searchBy === "title" && rawSearchQuery && searchQuery !== rawSearchQuery.toLowerCase()) {
+    searchInput.value = normalizeMediaSearchTitle(rawSearchQuery)
+  }
 
   try {
     const all = await fetchAllMedia()
@@ -656,7 +666,10 @@ async function searchMedia() {
       if (filterType !== "all" && item.media_type !== filterType) return false
       // Search filter
       if (!searchQuery) return true
-      if (searchBy === "title")        return item.title?.toLowerCase().includes(searchQuery)
+      if (searchBy === "title") {
+        const normalizedItemTitle = normalizeMediaSearchTitle(item.title).toLowerCase()
+        return normalizedItemTitle.includes(searchQuery)
+      }
       if (searchBy === "genre")        return item.genre?.toLowerCase().includes(searchQuery)
       if (searchBy === "release_year") {
         const y = parseInt(searchQuery)
