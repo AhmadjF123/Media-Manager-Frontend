@@ -1249,7 +1249,7 @@ async function addMedia(e) {
       showToast(`"${title}" added to your vault! 🎬`, "success")
       clearForm()
       await searchMedia()
-      setTimeout(() => switchView("collection"), 1200)
+      // Stay on Add New so another title can be added immediately.
     } else {
       showToast("Failed to add media", "error")
     }
