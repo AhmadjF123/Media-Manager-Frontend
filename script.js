@@ -1272,9 +1272,22 @@ function clearForm() {
 //  AUTO-FILL
 // ════════════════════════════════════════════════
 
+// Make copied/file-style titles TMDB-friendly.
+// Example: "How.To.Train.Your.Dragon" → "How To Train Your Dragon"
+function normalizeMediaSearchTitle(value) {
+  return String(value || "")
+    .replace(/[._]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 async function fetchMediaInfo() {
-  const title = titleInput.value.trim()
+  const rawTitle = titleInput.value.trim()
+  const title = normalizeMediaSearchTitle(rawTitle)
   if (!title) { showToast("Please enter a title to search", "error"); return }
+
+  // Show the cleaned title immediately, then replace it with TMDB's official title.
+  if (title !== rawTitle) titleInput.value = title
 
   const mediaType = mediaTypeSelect.value
   showLoading()
@@ -1318,7 +1331,8 @@ async function fetchMediaInfo() {
 
 async function searchMovieInfo(searchTitle) {
   try {
-    const searchUrl = `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}&language=en-US`
+    const cleanTitle = normalizeMediaSearchTitle(searchTitle)
+    const searchUrl = `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanTitle)}&language=en-US`
     const response  = await fetch(searchUrl)
     const data      = await response.json()
 
@@ -1354,7 +1368,8 @@ async function searchMovieInfo(searchTitle) {
 
 async function searchSeriesInfo(searchTitle) {
   try {
-    const searchUrl = `${TMDB_BASE_URL}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(searchTitle)}&language=en-US`
+    const cleanTitle = normalizeMediaSearchTitle(searchTitle)
+    const searchUrl = `${TMDB_BASE_URL}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanTitle)}&language=en-US`
     const response  = await fetch(searchUrl)
     const data      = await response.json()
 
@@ -1506,8 +1521,11 @@ function closeModal() {
 }
 
 async function fetchEditInfo() {
-  const title = editTitleInput.value.trim()
+  const rawTitle = editTitleInput.value.trim()
+  const title = normalizeMediaSearchTitle(rawTitle)
   if (!title) { showToast("Please enter a title to search", "error"); return }
+
+  if (title !== rawTitle) editTitleInput.value = title
 
   const mediaType = editMediaTypeInput.value
   showLoading()
