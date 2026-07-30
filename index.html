@@ -639,6 +639,89 @@
       </div>
     </div>
 
+    <!-- ═══════════ ACTOR / PERFORMER PROFILE ═══════════ -->
+    <div id="actor-profile-modal" class="actor-profile-overlay" aria-hidden="true">
+      <div class="actor-profile-shell" role="dialog" aria-modal="true" aria-labelledby="actor-profile-name">
+        <div id="actor-profile-bg" class="actor-profile-bg" aria-hidden="true"></div>
+
+        <button type="button" id="actor-profile-close" class="actor-profile-close" aria-label="Close performer profile" title="Back to title">
+          <i class="fas fa-arrow-left"></i>
+        </button>
+
+        <div class="actor-profile-scroll">
+          <section class="actor-profile-hero">
+            <div class="actor-profile-portrait-wrap">
+              <div id="actor-profile-portrait-ph" class="actor-profile-portrait-ph">
+                <i class="fas fa-user"></i>
+              </div>
+              <img id="actor-profile-portrait" class="actor-profile-portrait" src="" alt="" hidden />
+            </div>
+
+            <div class="actor-profile-heading">
+              <span class="actor-profile-kicker"><i class="fas fa-clapperboard"></i> Performer profile</span>
+              <h2 id="actor-profile-name">Performer</h2>
+              <p id="actor-profile-department" class="actor-profile-department"></p>
+              <div id="actor-profile-facts" class="actor-profile-facts"></div>
+              <div id="actor-profile-socials" class="actor-profile-socials"></div>
+            </div>
+
+            <div id="actor-profile-stats" class="actor-profile-stats"></div>
+          </section>
+
+          <div id="actor-profile-error" class="actor-profile-error" hidden></div>
+
+          <section id="actor-profile-content" class="actor-profile-content">
+            <div class="actor-profile-main">
+              <article class="actor-profile-panel actor-bio-panel">
+                <div class="actor-profile-panel-head">
+                  <div>
+                    <span class="actor-profile-section-kicker">Story</span>
+                    <h3>Biography</h3>
+                  </div>
+                  <button type="button" id="actor-bio-toggle" class="actor-profile-text-btn" hidden>Read more</button>
+                </div>
+                <p id="actor-profile-biography" class="actor-profile-biography"></p>
+                <div id="actor-profile-aliases" class="actor-profile-aliases"></div>
+              </article>
+
+              <article class="actor-profile-panel actor-filmography-panel">
+                <div class="actor-filmography-head">
+                  <div>
+                    <span class="actor-profile-section-kicker">Credits</span>
+                    <h3>Filmography</h3>
+                    <p id="actor-filmography-summary"></p>
+                  </div>
+                  <div class="actor-filmography-filters" role="tablist" aria-label="Filter filmography">
+                    <button type="button" class="actor-filmography-filter active" data-actor-filter="all">All</button>
+                    <button type="button" class="actor-filmography-filter" data-actor-filter="movie">Movies</button>
+                    <button type="button" class="actor-filmography-filter" data-actor-filter="series">Series</button>
+                  </div>
+                </div>
+                <div id="actor-filmography-grid" class="actor-filmography-grid"></div>
+                <button type="button" id="actor-filmography-more" class="actor-filmography-more" hidden>
+                  <i class="fas fa-plus"></i> Show more credits
+                </button>
+              </article>
+            </div>
+
+            <aside class="actor-profile-side">
+              <article class="actor-profile-panel">
+                <span class="actor-profile-section-kicker">Known for</span>
+                <h3>Highlights</h3>
+                <div id="actor-known-for" class="actor-known-for"></div>
+              </article>
+
+              <article id="actor-vault-panel" class="actor-profile-panel actor-vault-panel">
+                <span class="actor-profile-section-kicker">Your collection</span>
+                <h3>Inside your vault</h3>
+                <div id="actor-vault-summary" class="actor-vault-summary"></div>
+              </article>
+            </aside>
+          </section>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══════════ EDIT MODAL ═══════════ -->
     <div id="edit-modal" class="edit-overlay">
       <div class="edit-box">

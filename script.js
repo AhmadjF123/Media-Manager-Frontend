@@ -105,6 +105,7 @@ const editNotesInput        = document.getElementById("edit-notes")
 // ── Global state ──
 let currentResults  = []
 let currentGridMode = 'grid'
+let detailRequestSerial = 0
 
 // ── Actor search state ──
 const actorSearchState = {
@@ -117,6 +118,17 @@ const actorSearchState = {
 const _actorPeopleCache          = new Map()
 const _actorCreditsCache         = new Map()
 const _actorVaultCandidatesCache = new Map()
+
+// ── Performer profile state ──
+const actorProfileState = {
+  person: null,
+  credits: [],
+  filter: "all",
+  visibleLimit: 24,
+  requestSerial: 0,
+  vaultLookup: null,
+}
+const _actorProfileCache = new Map()
 
 // ── Sorting state ──
 const SORT_STORAGE_KEY = "cinema_sort_preference"
@@ -636,6 +648,15 @@ async function init() {
       if (e.target === detOverlay) closeDetailModal()
     })
   }
+
+  const actorProfileModal = document.getElementById("actor-profile-modal")
+  document.getElementById("actor-profile-close")?.addEventListener("click", closeActorProfile)
+  document.getElementById("actor-bio-toggle")?.addEventListener("click", toggleActorBiography)
+  document.getElementById("actor-filmography-more")?.addEventListener("click", () => {
+    actorProfileState.visibleLimit += 24
+    renderActorFilmography()
+  })
+  actorProfileModal?.addEventListener("click", handleActorProfileClick)
 
   // Edit modal close
   window.addEventListener("click", e => {
@@ -1965,6 +1986,7 @@ async function fetchTMDBDetails(title, year, mediaType) {
 function showDetailModal(item) {
   const overlay = document.getElementById("detail-modal")
   if (!overlay) return
+  const detailSerial = ++detailRequestSerial
 
   const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0
 
@@ -2082,14 +2104,26 @@ function showDetailModal(item) {
 
   // Async: fetch TMDB extra info
   fetchTMDBDetails(item.title, item.release_year, item.media_type).then(tmdb => {
+    if (detailSerial !== detailRequestSerial || overlay.style.display !== "flex") return
     if (!tmdb || !extraEl) return
 
     // Overview
     const overview = tmdb.overview || ""
 
     // Top cast (max 4)
-    const cast = (tmdb.credits?.cast || []).slice(0, 4)
-      .map(c => `<span class="cast-chip"><img src="${c.profile_path ? TMDB_IMAGE_URL + c.profile_path : ""}" onerror="this.style.display='none'" class="cast-img">${escapeHtml(c.name)}</span>`)
+    const cast = (tmdb.credits?.cast || []).slice(0, 6)
+      .map(c => `
+        <button type="button" class="cast-chip" onclick="openActorProfile(${Number(c.id)})"
+          aria-label="Open ${escapeHtml(c.name)} profile" title="${escapeHtml(c.character ? `${c.name} as ${c.character}` : `View ${c.name} profile`)}">
+          ${c.profile_path
+            ? `<img src="${TMDB_IMAGE_URL + c.profile_path}" onerror="this.style.display='none'" class="cast-img" alt="">`
+            : `<span class="cast-img cast-img-placeholder"><i class="fas fa-user"></i></span>`}
+          <span class="cast-chip-copy">
+            <strong>${escapeHtml(c.name)}</strong>
+            ${c.character ? `<small>${escapeHtml(c.character)}</small>` : ""}
+          </span>
+          <i class="fas fa-chevron-right cast-chip-arrow"></i>
+        </button>`)
       .join("")
 
     // Trailer
@@ -2130,9 +2164,397 @@ function showDetailModal(item) {
       }
     `
   }).catch(() => {
-    if (extraEl) extraEl.innerHTML = ""
+    if (detailSerial === detailRequestSerial && extraEl) extraEl.innerHTML = ""
   })
 }
+
+
+function getActorProfileElement(id) {
+  return document.getElementById(id)
+}
+
+function isActorProfileOpen() {
+  return getActorProfileElement("actor-profile-modal")?.classList.contains("open") || false
+}
+
+async function fetchActorProfile(personId) {
+  const id = Number(personId)
+  if (!Number.isFinite(id) || id <= 0) throw new Error("Invalid performer")
+  if (_actorProfileCache.has(id)) return _actorProfileCache.get(id)
+
+  const response = await fetch(
+    `${TMDB_BASE_URL}/person/${id}?api_key=${TMDB_API_KEY}&language=en-US&append_to_response=combined_credits,external_ids`
+  )
+  if (!response.ok) throw new Error("Could not load this performer right now")
+  const person = await response.json()
+  _actorProfileCache.set(id, person)
+  return person
+}
+
+function renderActorProfileLoading() {
+  getActorProfileElement("actor-profile-bg").style.backgroundImage = ""
+  const portrait = getActorProfileElement("actor-profile-portrait")
+  const portraitPh = getActorProfileElement("actor-profile-portrait-ph")
+  portrait.hidden = true
+  portrait.removeAttribute("src")
+  portraitPh.hidden = false
+  portraitPh.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i>`
+
+  getActorProfileElement("actor-profile-name").textContent = "Loading profile…"
+  getActorProfileElement("actor-profile-department").textContent = ""
+  getActorProfileElement("actor-profile-facts").innerHTML = ""
+  getActorProfileElement("actor-profile-socials").innerHTML = ""
+  getActorProfileElement("actor-profile-stats").innerHTML = `
+    <div class="actor-profile-stat is-loading"></div>
+    <div class="actor-profile-stat is-loading"></div>
+    <div class="actor-profile-stat is-loading"></div>`
+  getActorProfileElement("actor-profile-biography").textContent = "Loading biography and filmography…"
+  getActorProfileElement("actor-profile-biography").classList.remove("expanded")
+  getActorProfileElement("actor-profile-aliases").innerHTML = ""
+  getActorProfileElement("actor-filmography-grid").innerHTML = Array.from({ length: 8 }, () => `
+    <div class="actor-work-card actor-work-skeleton"><span></span><span></span></div>`).join("")
+  getActorProfileElement("actor-filmography-summary").textContent = "Gathering credits…"
+  getActorProfileElement("actor-known-for").innerHTML = ""
+  getActorProfileElement("actor-vault-summary").innerHTML = ""
+  getActorProfileElement("actor-profile-error").hidden = true
+  getActorProfileElement("actor-profile-content").hidden = false
+  getActorProfileElement("actor-filmography-more").hidden = true
+  getActorProfileElement("actor-bio-toggle").hidden = true
+}
+
+function normaliseActorCredits(person) {
+  const credits = person?.combined_credits?.cast || []
+  const unique = new Map()
+
+  credits.forEach(raw => {
+    if (!raw?.id || !["movie", "tv"].includes(raw.media_type)) return
+    const title = (raw.title || raw.name || "").trim()
+    if (!title) return
+
+    const mediaType = raw.media_type === "tv" ? "series" : "movie"
+    const date = raw.release_date || raw.first_air_date || ""
+    const year = date ? String(date).slice(0, 4) : ""
+    const key = `${mediaType}:${raw.id}`
+    const existing = unique.get(key)
+    const character = (raw.character || "").trim()
+
+    const credit = {
+      ...raw,
+      _key: key,
+      _mediaType: mediaType,
+      _title: title,
+      _date: date,
+      _year: year,
+      _character: character,
+      _popularity: Number(raw.popularity || 0),
+      _rating: Number(raw.vote_average || 0),
+      _votes: Number(raw.vote_count || 0),
+    }
+
+    if (!existing) {
+      unique.set(key, credit)
+      return
+    }
+
+    if (character && !existing._character.includes(character)) {
+      existing._character = [existing._character, character].filter(Boolean).join(" / ")
+    }
+    if (credit._popularity > existing._popularity) {
+      unique.set(key, { ...credit, _character: existing._character || credit._character })
+    }
+  })
+
+  return Array.from(unique.values()).sort((a, b) =>
+    (b._popularity - a._popularity)
+      || (b._votes - a._votes)
+      || String(b._date).localeCompare(String(a._date))
+      || a._title.localeCompare(b._title)
+  )
+}
+
+function buildActorVaultLookup() {
+  const collection = Array.isArray(_cache.data) ? _cache.data : []
+  const byTitle = new Map()
+
+  collection.forEach(item => {
+    const title = normalizeMediaSearchTitle(item.title || "").toLowerCase()
+    if (!title) return
+    const type = item.media_type === "series" ? "series" : "movie"
+    const key = `${type}|${title}`
+    if (!byTitle.has(key)) byTitle.set(key, [])
+    byTitle.get(key).push(item)
+  })
+
+  return byTitle
+}
+
+function findVaultItemForActorCredit(credit) {
+  const lookup = actorProfileState.vaultLookup
+  if (!lookup || !credit) return null
+  const key = `${credit._mediaType}|${normalizeMediaSearchTitle(credit._title).toLowerCase()}`
+  const candidates = lookup.get(key) || []
+  if (!candidates.length) return null
+
+  const creditYear = Number(credit._year || 0)
+  if (!creditYear) return candidates[0]
+  return candidates.find(item => Number(item.release_year || 0) === creditYear)
+    || candidates.find(item => Math.abs(Number(item.release_year || 0) - creditYear) <= 1)
+    || null
+}
+
+function formatActorDate(value) {
+  if (!value) return ""
+  const date = new Date(`${value}T00:00:00Z`)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" })
+}
+
+function calculateActorAge(birthday, deathday = null) {
+  if (!birthday) return null
+  const birth = new Date(`${birthday}T00:00:00Z`)
+  const end = deathday ? new Date(`${deathday}T00:00:00Z`) : new Date()
+  if (Number.isNaN(birth.getTime()) || Number.isNaN(end.getTime())) return null
+  let age = end.getUTCFullYear() - birth.getUTCFullYear()
+  const beforeBirthday = end.getUTCMonth() < birth.getUTCMonth()
+    || (end.getUTCMonth() === birth.getUTCMonth() && end.getUTCDate() < birth.getUTCDate())
+  if (beforeBirthday) age -= 1
+  return age >= 0 ? age : null
+}
+
+function getActorSocialLinks(person) {
+  const ids = person.external_ids || {}
+  const links = []
+  if (ids.imdb_id) links.push({ label: "IMDb", icon: "fa-imdb", brand: true, url: `https://www.imdb.com/name/${ids.imdb_id}` })
+  if (ids.instagram_id) links.push({ label: "Instagram", icon: "fa-instagram", brand: true, url: `https://www.instagram.com/${ids.instagram_id}` })
+  if (ids.facebook_id) links.push({ label: "Facebook", icon: "fa-facebook-f", brand: true, url: `https://www.facebook.com/${ids.facebook_id}` })
+  if (ids.twitter_id) links.push({ label: "X", icon: "fa-x-twitter", brand: true, url: `https://x.com/${ids.twitter_id}` })
+  if (person.homepage && /^https?:\/\//i.test(person.homepage)) {
+    links.push({ label: "Website", icon: "fa-globe", brand: false, url: person.homepage })
+  }
+  return links
+}
+
+function renderActorProfile(person) {
+  actorProfileState.person = person
+  actorProfileState.credits = normaliseActorCredits(person)
+  actorProfileState.filter = "all"
+  actorProfileState.visibleLimit = 24
+  actorProfileState.vaultLookup = buildActorVaultLookup()
+
+  const portrait = getActorProfileElement("actor-profile-portrait")
+  const portraitPh = getActorProfileElement("actor-profile-portrait-ph")
+  const profileUrl = person.profile_path ? `${TMDB_IMAGE_URL}${person.profile_path}` : ""
+  if (profileUrl) {
+    portrait.src = profileUrl
+    portrait.alt = person.name || "Performer"
+    portrait.hidden = false
+    portraitPh.hidden = true
+    getActorProfileElement("actor-profile-bg").style.backgroundImage = `url(${profileUrl})`
+  } else {
+    portrait.hidden = true
+    portraitPh.hidden = false
+    portraitPh.innerHTML = `<i class="fas fa-user"></i>`
+    getActorProfileElement("actor-profile-bg").style.backgroundImage = ""
+  }
+
+  getActorProfileElement("actor-profile-name").textContent = person.name || "Performer"
+  getActorProfileElement("actor-profile-department").textContent = person.known_for_department || "Acting"
+
+  const age = calculateActorAge(person.birthday, person.deathday)
+  const facts = []
+  if (person.birthday) {
+    facts.push(`<span><i class="fas fa-cake-candles"></i>${escapeHtml(formatActorDate(person.birthday))}${age !== null ? ` · ${age} ${person.deathday ? "years" : "years old"}` : ""}</span>`)
+  }
+  if (person.deathday) facts.push(`<span><i class="fas fa-ribbon"></i>Died ${escapeHtml(formatActorDate(person.deathday))}</span>`)
+  if (person.place_of_birth) facts.push(`<span><i class="fas fa-location-dot"></i>${escapeHtml(person.place_of_birth)}</span>`)
+  getActorProfileElement("actor-profile-facts").innerHTML = facts.join("")
+
+  const socialLinks = getActorSocialLinks(person)
+  getActorProfileElement("actor-profile-socials").innerHTML = socialLinks.map(link => `
+    <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer" title="Open ${escapeHtml(link.label)}">
+      <i class="${link.brand ? "fab" : "fas"} ${link.icon}"></i><span>${escapeHtml(link.label)}</span>
+    </a>`).join("")
+
+  const movieCount = actorProfileState.credits.filter(c => c._mediaType === "movie").length
+  const seriesCount = actorProfileState.credits.filter(c => c._mediaType === "series").length
+  const vaultCount = actorProfileState.credits.filter(findVaultItemForActorCredit).length
+  getActorProfileElement("actor-profile-stats").innerHTML = `
+    <div class="actor-profile-stat"><strong>${actorProfileState.credits.length}</strong><span>Credits</span></div>
+    <div class="actor-profile-stat"><strong>${movieCount}</strong><span>Movies</span></div>
+    <div class="actor-profile-stat"><strong>${seriesCount}</strong><span>Series</span></div>`
+
+  const biography = (person.biography || "").trim()
+  const bioEl = getActorProfileElement("actor-profile-biography")
+  bioEl.textContent = biography || "No biography is currently available for this performer."
+  bioEl.classList.remove("expanded")
+  const bioToggle = getActorProfileElement("actor-bio-toggle")
+  bioToggle.hidden = biography.length < 430
+  bioToggle.textContent = "Read more"
+
+  const aliases = (person.also_known_as || []).filter(Boolean).slice(0, 8)
+  getActorProfileElement("actor-profile-aliases").innerHTML = aliases.length
+    ? `<span class="actor-aliases-label">Also known as</span>${aliases.map(name => `<span>${escapeHtml(name)}</span>`).join("")}`
+    : ""
+
+  const highlights = actorProfileState.credits.slice(0, 5)
+  getActorProfileElement("actor-known-for").innerHTML = highlights.length
+    ? highlights.map(credit => renderActorHighlight(credit)).join("")
+    : `<p class="actor-profile-empty">No highlighted credits available.</p>`
+
+  getActorProfileElement("actor-vault-summary").innerHTML = vaultCount
+    ? `<strong>${vaultCount}</strong><span>${vaultCount === 1 ? "title is" : "titles are"} already in your collection.</span>`
+    : `<strong>0</strong><span>No matching titles in your collection yet.</span>`
+  getActorProfileElement("actor-vault-panel").classList.toggle("has-vault-items", vaultCount > 0)
+
+  document.querySelectorAll(".actor-filmography-filter").forEach(button => {
+    button.classList.toggle("active", button.dataset.actorFilter === "all")
+  })
+  renderActorFilmography()
+}
+
+function renderActorHighlight(credit) {
+  const poster = credit.poster_path
+    ? `<img src="${TMDB_IMAGE_URL}${credit.poster_path}" alt="" loading="lazy">`
+    : `<span class="actor-highlight-ph"><i class="fas ${credit._mediaType === "series" ? "fa-tv" : "fa-film"}"></i></span>`
+  return `
+    <button type="button" class="actor-highlight" data-actor-work-key="${escapeHtml(credit._key)}">
+      ${poster}
+      <span><strong>${escapeHtml(credit._title)}</strong><small>${escapeHtml(credit._year || credit._mediaType)}</small></span>
+      <i class="fas fa-chevron-right"></i>
+    </button>`
+}
+
+function renderActorFilmography() {
+  const grid = getActorProfileElement("actor-filmography-grid")
+  if (!grid) return
+
+  const filtered = actorProfileState.credits.filter(credit =>
+    actorProfileState.filter === "all" || credit._mediaType === actorProfileState.filter
+  )
+  const visible = filtered.slice(0, actorProfileState.visibleLimit)
+
+  getActorProfileElement("actor-filmography-summary").textContent = `${filtered.length} ${actorProfileState.filter === "all" ? "movie and series" : actorProfileState.filter === "movie" ? "movie" : "series"} credit${filtered.length === 1 ? "" : "s"}`
+
+  if (!visible.length) {
+    grid.innerHTML = `<div class="actor-profile-empty actor-filmography-empty"><i class="fas fa-film"></i>No credits in this category.</div>`
+  } else {
+    grid.innerHTML = visible.map(credit => {
+      const vaultItem = findVaultItemForActorCredit(credit)
+      const poster = credit.poster_path
+        ? `<img src="${TMDB_IMAGE_URL}${credit.poster_path}" alt="${escapeHtml(credit._title)}" loading="lazy">`
+        : `<span class="actor-work-poster-ph"><i class="fas ${credit._mediaType === "series" ? "fa-tv" : "fa-film"}"></i></span>`
+      const character = credit._character ? escapeHtml(credit._character) : "Cast"
+      const rating = credit._rating > 0 ? `<span><i class="fas fa-star"></i>${credit._rating.toFixed(1)}</span>` : ""
+      return `
+        <button type="button" class="actor-work-card ${vaultItem ? "in-vault" : ""}" data-actor-work-key="${escapeHtml(credit._key)}" title="${vaultItem ? "Open this title from your collection" : "Open on TMDB"}">
+          <span class="actor-work-poster">
+            ${poster}
+            <span class="actor-work-type ${credit._mediaType}">${credit._mediaType === "series" ? "Series" : "Movie"}</span>
+            ${vaultItem ? `<span class="actor-work-vault"><i class="fas fa-vault"></i> In vault</span>` : ""}
+          </span>
+          <span class="actor-work-body">
+            <strong>${escapeHtml(credit._title)}</strong>
+            <small>${escapeHtml(credit._year || "Year unknown")} · ${character}</small>
+            <span class="actor-work-meta">${rating}<span><i class="fas fa-arrow-up-right-from-square"></i>${vaultItem ? "View title" : "TMDB"}</span></span>
+          </span>
+        </button>`
+    }).join("")
+  }
+
+  const moreButton = getActorProfileElement("actor-filmography-more")
+  moreButton.hidden = visible.length >= filtered.length
+  if (!moreButton.hidden) {
+    moreButton.innerHTML = `<i class="fas fa-plus"></i> Show ${Math.min(24, filtered.length - visible.length)} more credits`
+  }
+}
+
+function toggleActorBiography() {
+  const bio = getActorProfileElement("actor-profile-biography")
+  const button = getActorProfileElement("actor-bio-toggle")
+  if (!bio || !button) return
+  const expanded = bio.classList.toggle("expanded")
+  button.textContent = expanded ? "Show less" : "Read more"
+}
+
+function handleActorProfileClick(event) {
+  const modal = getActorProfileElement("actor-profile-modal")
+  if (event.target === modal) {
+    closeActorProfile()
+    return
+  }
+
+  const filterButton = event.target.closest("[data-actor-filter]")
+  if (filterButton) {
+    actorProfileState.filter = filterButton.dataset.actorFilter
+    actorProfileState.visibleLimit = 24
+    document.querySelectorAll(".actor-filmography-filter").forEach(button => {
+      button.classList.toggle("active", button === filterButton)
+    })
+    renderActorFilmography()
+    return
+  }
+
+  const workButton = event.target.closest("[data-actor-work-key]")
+  if (workButton) openActorWork(workButton.dataset.actorWorkKey)
+}
+
+function openActorWork(key) {
+  const credit = actorProfileState.credits.find(item => item._key === key)
+  if (!credit) return
+
+  const vaultItem = findVaultItemForActorCredit(credit)
+  if (vaultItem) {
+    closeActorProfile()
+    const prepared = prepareDisplayResults([{ ...vaultItem }])[0]
+    requestAnimationFrame(() => showDetailModal(prepared))
+    return
+  }
+
+  const tmdbType = credit._mediaType === "series" ? "tv" : "movie"
+  window.open(`https://www.themoviedb.org/${tmdbType}/${credit.id}`, "_blank", "noopener,noreferrer")
+}
+
+async function openActorProfile(personId) {
+  const modal = getActorProfileElement("actor-profile-modal")
+  if (!modal) return
+
+  const serial = ++actorProfileState.requestSerial
+  actorProfileState.person = null
+  actorProfileState.credits = []
+  actorProfileState.filter = "all"
+  actorProfileState.visibleLimit = 24
+  renderActorProfileLoading()
+
+  modal.classList.add("open")
+  modal.setAttribute("aria-hidden", "false")
+  document.body.style.overflow = "hidden"
+
+  try {
+    const person = await fetchActorProfile(personId)
+    if (serial !== actorProfileState.requestSerial || !isActorProfileOpen()) return
+    renderActorProfile(person)
+  } catch (error) {
+    if (serial !== actorProfileState.requestSerial) return
+    const errorEl = getActorProfileElement("actor-profile-error")
+    errorEl.hidden = false
+    errorEl.innerHTML = `<i class="fas fa-triangle-exclamation"></i><div><strong>Profile unavailable</strong><span>${escapeHtml(error.message || "Please try again")}</span></div>`
+    getActorProfileElement("actor-profile-content").hidden = true
+    getActorProfileElement("actor-profile-name").textContent = "Could not load profile"
+    getActorProfileElement("actor-profile-stats").innerHTML = ""
+  }
+}
+window.openActorProfile = openActorProfile
+
+function closeActorProfile() {
+  const modal = getActorProfileElement("actor-profile-modal")
+  if (!modal) return
+  actorProfileState.requestSerial += 1
+  modal.classList.remove("open")
+  modal.setAttribute("aria-hidden", "true")
+  const detailModal = document.getElementById("detail-modal")
+  document.body.style.overflow = detailModal?.style.display === "flex" ? "hidden" : ""
+}
+window.closeActorProfile = closeActorProfile
 
 function playTrailer(key) {
   const lb    = document.getElementById("trailer-lightbox")
@@ -2154,6 +2576,10 @@ window.closeTrailerLightbox = closeTrailerLightbox
 
 function handleDetEscape(e) {
   if (e.key === "Escape") {
+    if (isActorProfileOpen()) {
+      closeActorProfile()
+      return
+    }
     const lb = document.getElementById("trailer-lightbox")
     if (lb && lb.classList.contains("open")) {
       closeTrailerLightbox()
@@ -2166,6 +2592,8 @@ function handleDetEscape(e) {
 function closeDetailModal() {
   const overlay = document.getElementById("detail-modal")
   if (!overlay) return
+  detailRequestSerial += 1
+  closeActorProfile()
   overlay.style.display = "none"
   document.body.style.overflow = ""
   document.removeEventListener("keydown", handleDetEscape)
