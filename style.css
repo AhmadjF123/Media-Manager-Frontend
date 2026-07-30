@@ -3895,3 +3895,8 @@ body.instant-hydrate .card-grid.is-reordering .media-card {
   animation: none !important;
   transition: none !important;
 }
+
+/* Saving an edit updates only that card; do not replay the entrance animation. */
+.media-card.card-just-updated {
+  animation: none !important;
+}

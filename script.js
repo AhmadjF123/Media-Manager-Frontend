@@ -250,22 +250,107 @@ function applyLocalMediaDelete(mediaType, orderNumber) {
   return nextCollection
 }
 
+function mediaMatchesCurrentFilters(item) {
+  const filterType = filterTypeSelect.value
+  if (filterType !== "all" && item.media_type !== filterType) return false
+
+  if (searchBySelect.value === "actor") return Boolean(item._actorMatch)
+
+  const rawQuery = searchInput.value.trim()
+  const searchBy = searchBySelect.value
+  const query = searchBy === "title"
+    ? normalizeMediaSearchTitle(rawQuery).toLowerCase()
+    : rawQuery.toLowerCase()
+
+  if (!query) return true
+  if (searchBy === "title") {
+    return normalizeMediaSearchTitle(item.title).toLowerCase().includes(query)
+  }
+  if (searchBy === "genre") return item.genre?.toLowerCase().includes(query)
+  if (searchBy === "release_year") {
+    const year = parseInt(query)
+    return !Number.isNaN(year) && (item.release_year === year || item.end_year === year)
+  }
+  if (searchBy === "rating") {
+    const rating = parseFloat(query)
+    return !Number.isNaN(rating) && parseFloat(item.rating) === rating
+  }
+  return true
+}
+
+function mediaIdentity(item) {
+  return `${item.media_type}:${Number(item.order_number)}`
+}
+
+function replaceRenderedCard(item, index) {
+  const existingCard = document.querySelector(`.media-card[data-index="${index}"]`)
+  if (!existingCard) return false
+  const replacement = buildMediaCard(item, index)
+  replacement.classList.add("card-just-updated")
+  existingCard.replaceWith(replacement)
+  window.setTimeout(() => replacement.classList.remove("card-just-updated"), 500)
+  return true
+}
+
+function refreshStatusAndStats() {
+  if (statusLabel) {
+    const directionCopy = getSortDirectionCopy()
+    const actor = searchBySelect.value === "actor" ? actorSearchState.selected : null
+    statusLabel.textContent = currentResults.length > 0
+      ? actor
+        ? `${currentResults.length} title${currentResults.length !== 1 ? "s" : ""} featuring ${actor.name} · ${getSortFieldLabel()}, ${directionCopy.long}`
+        : `${currentResults.length} title${currentResults.length !== 1 ? "s" : ""} · ${getSortFieldLabel()}, ${directionCopy.long}`
+      : actor
+        ? `No titles featuring ${actor.name} in your vault`
+        : "No results found"
+  }
+  updateStats(currentResults)
+}
+
 async function renderAfterLocalMediaUpdate(mediaType, orderNumber, updatedItem) {
-  if (searchBySelect.value === "actor") {
-    const nextResults = currentResults.map(item => {
-      if (item.media_type !== mediaType || Number(item.order_number) !== Number(orderNumber)) return item
-      return {
-        ...item,
-        ...updatedItem,
-        _actorMatch: item._actorMatch,
-      }
-    })
-    updateResultsTable(prepareDisplayResults(nextResults))
+  const previousIndex = currentResults.findIndex(item =>
+    item.media_type === mediaType && Number(item.order_number) === Number(orderNumber)
+  )
+  if (previousIndex < 0) return
+
+  const previous = currentResults[previousIndex]
+  const prepared = prepareDisplayResults([{
+    ...previous,
+    ...updatedItem,
+    _actorMatch: previous._actorMatch,
+  }])[0]
+
+  // If an edit makes the item stop matching the active search, remove it cleanly.
+  if (!mediaMatchesCurrentFilters(prepared)) {
+    currentResults.splice(previousIndex, 1)
+    document.body.classList.add("instant-hydrate")
+    updateResultsTable(currentResults)
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.body.classList.remove("instant-hydrate")
+    }))
     return
   }
 
-  // Uses the just-updated in-memory cache, so this redraw performs no network request.
-  await searchMedia({ showSkeleton: false })
+  currentResults[previousIndex] = prepared
+  const sorted = sortMediaItems([...currentResults])
+  const newIndex = sorted.findIndex(item => mediaIdentity(item) === mediaIdentity(prepared))
+  currentResults = sorted
+  _cardPool = currentResults
+
+  // When the edited sort field changes its position, redraw silently without loaders.
+  if (newIndex !== previousIndex) {
+    document.body.classList.add("instant-hydrate")
+    updateResultsTable(currentResults)
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.body.classList.remove("instant-hydrate")
+    }))
+    return
+  }
+
+  // Common path: replace only the edited card/row. No collection refresh and no network call.
+  replaceRenderedCard(prepared, previousIndex)
+  if (currentGridMode === "list") renderCurrentTableRows()
+  refreshStatusAndStats()
 }
 
 // ════════════════════════════════════════════════
@@ -323,9 +408,27 @@ async function fetchAllMedia({ showSkeleton = true, force = false } = {}) {
   const cached = _cacheGet()
   if (!force && cached) return cached
 
+  // Skeletons are a slow-network fallback, not the first thing the user sees.
+  // A fast response finishes before this timer fires, so no loading flash occurs.
+  let skeletonTimer = null
+  let skeletonShown = false
+  const scheduleSkeleton = () => {
+    if (!showSkeleton) return
+    skeletonTimer = window.setTimeout(() => {
+      skeletonTimer = null
+      skeletonShown = true
+      showSkeletons(20)
+    }, 550)
+  }
+  const stopSkeletonTimer = () => {
+    if (skeletonTimer) {
+      window.clearTimeout(skeletonTimer)
+      skeletonTimer = null
+    }
+  }
+
   try {
-    // Normal collection loads use skeletons. Background cast matching stays invisible.
-    if (showSkeleton) showSkeletons(20)
+    scheduleSkeleton()
     const params = new URLSearchParams({
       type: "all",
       sort_by: sortState.field,
@@ -334,17 +437,26 @@ async function fetchAllMedia({ showSkeleton = true, force = false } = {}) {
     const response = await fetch(`${API_BASE_URL}/all?${params.toString()}`, {
       headers: authHeaders()
     })
-    if (response.status === 401) { handleUnauthorized(); return [] }
+
+    // The network answered. Prevent a late skeleton from appearing while JSON is parsed.
+    stopSkeletonTimer()
+
+    if (response.status === 401) {
+      if (skeletonShown) hideSkeletons()
+      handleUnauthorized()
+      return []
+    }
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
     const data = await response.json()
-    if (showSkeleton) hideSkeletons()
+    if (skeletonShown) hideSkeletons()
     if (!Array.isArray(data)) return []
     const normalised = data.map(normaliseMediaItem)
     _cacheSet(normalised)
     saveCollectionSnapshot(normalised)
     return normalised
   } catch(error) {
-    if (showSkeleton) hideSkeletons()
+    stopSkeletonTimer()
+    if (skeletonShown) hideSkeletons()
     if (Array.isArray(cached) && cached.length) {
       showToast("Showing your saved collection while the server reconnects", "info")
       return cached
@@ -356,7 +468,7 @@ async function fetchAllMedia({ showSkeleton = true, force = false } = {}) {
 
 // ── Legacy helper (used in edit/duplicate checks — uses cache) ──
 async function fetchMedia(mediaType) {
-  const all = await fetchAllMedia()
+  const all = await fetchAllMedia({ showSkeleton: false })
   return all.filter(item => item.media_type === mediaType)
 }
 
@@ -876,26 +988,7 @@ async function searchMedia(options = {}) {
   try {
     const all = await fetchAllMedia({ showSkeleton, force: forceRefresh })
 
-    let results = all.filter(item => {
-      // Type filter
-      if (filterType !== "all" && item.media_type !== filterType) return false
-      // Search filter
-      if (!searchQuery) return true
-      if (searchBy === "title") {
-        const normalizedItemTitle = normalizeMediaSearchTitle(item.title).toLowerCase()
-        return normalizedItemTitle.includes(searchQuery)
-      }
-      if (searchBy === "genre")        return item.genre?.toLowerCase().includes(searchQuery)
-      if (searchBy === "release_year") {
-        const y = parseInt(searchQuery)
-        return !isNaN(y) && (item.release_year === y || item.end_year === y)
-      }
-      if (searchBy === "rating") {
-        const r = parseFloat(searchQuery)
-        return !isNaN(r) && parseFloat(item.rating) === r
-      }
-      return true
-    })
+    let results = all.filter(mediaMatchesCurrentFilters)
 
     results = prepareDisplayResults(results)
     updateResultsTable(results)
@@ -1595,9 +1688,10 @@ function renderCurrentTableRows() {
   if (currentGridMode !== "list") return
 
   const fragment = document.createDocumentFragment()
-  currentResults.forEach(item => {
+  currentResults.forEach((item, index) => {
     const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0
     const row = document.createElement("tr")
+    row.dataset.index = index
     row.innerHTML = `
       <td><input type="checkbox" class="chk" onclick="toggleRowSelection(this)"></td>
       <td>${item.order_number}</td>
@@ -2080,23 +2174,7 @@ function closeDetailModal() {
 window.closeDetailModal = closeDetailModal
 
 function editItemDirectly(item) {
-  // Find & select corresponding table row then trigger edit
-  const rows = document.querySelectorAll("#results-body tr")
-  let found = false
-  rows.forEach(row => {
-    const oCell = row.cells[1]
-    const tCell = row.cells[6]
-    if (oCell && parseInt(oCell.textContent) === item.order_number &&
-        tCell && tCell.textContent.toLowerCase() === item.media_type) {
-      const cb = row.querySelector("input[type='checkbox']")
-      if (cb) {
-        cb.checked = true
-        toggleRowSelection(cb)
-        found = true
-      }
-    }
-  })
-  if (found) editSelected()
+  openEditModalForItem(item)
 }
 
 // ════════════════════════════════════════════════
@@ -2390,97 +2468,88 @@ async function searchSeriesInfo(searchTitle) {
 //  EDIT
 // ════════════════════════════════════════════════
 
+function getSelectedMediaItems() {
+  const selector = currentGridMode === "grid"
+    ? "#card-grid .card-chk:checked"
+    : "#results-body input[type='checkbox']:checked"
+
+  return Array.from(document.querySelectorAll(selector))
+    .map(checkbox => {
+      const container = currentGridMode === "grid"
+        ? checkbox.closest(".media-card")
+        : checkbox.closest("tr")
+      const index = Number(container?.dataset.index)
+      return Number.isInteger(index) ? currentResults[index] : null
+    })
+    .filter(Boolean)
+}
+
+function openEditModalForItem(mediaItem) {
+  if (!mediaItem) {
+    showToast("Could not find the selected item", "error")
+    return
+  }
+
+  const orderNumber = Number(mediaItem.order_number)
+  const mediaType = mediaItem.media_type
+
+  editOrderInput.value       = orderNumber
+  editTitleInput.value       = mediaItem.title || ""
+  editGenreInput.value       = mediaItem.genre || ""
+  editReleaseYearInput.value = mediaItem.release_year || ""
+  editRatingInput.value      = mediaItem.rating ?? ""
+  editMediaTypeInput.value   = mediaType
+
+  if (mediaType === "series") {
+    editEndYearGroup.style.display = "flex"
+    editEndYearInput.value = mediaItem.end_year || mediaItem.release_year || ""
+  } else {
+    editEndYearGroup.style.display = "none"
+    editEndYearInput.value = ""
+  }
+
+  if (mediaItem.poster_url) {
+    editPosterImage.src = mediaItem.poster_url
+    editPosterImage.style.display = "block"
+    editPosterPlaceholder.style.display = "none"
+  } else {
+    editPosterImage.removeAttribute("src")
+    editPosterImage.style.display = "none"
+    editPosterPlaceholder.style.display = "flex"
+  }
+
+  if (editWatchStatusSelect) editWatchStatusSelect.value = mediaItem.watch_status || ""
+  if (editWatchDateInput) editWatchDateInput.value = mediaItem.watch_date
+    ? new Date(mediaItem.watch_date).toISOString().split("T")[0]
+    : ""
+  if (editRewatchCountInput) editRewatchCountInput.value = mediaItem.rewatch_count ?? 0
+  if (editFavoriteChk) editFavoriteChk.checked = Boolean(mediaItem.favorite)
+  if (editNotesInput) editNotesInput.value = mediaItem.notes || ""
+
+  const personalSection = editModal?.querySelector(".personal-section")
+  const hasPersonal = Boolean(
+    mediaItem.watch_status || mediaItem.notes || mediaItem.favorite || mediaItem.watch_date
+  )
+  personalSection?.classList.toggle("personal-section--open", hasPersonal)
+
+  editModal.style.display = "flex"
+  editModal.style.alignItems = "center"
+  editModal.style.justifyContent = "center"
+  document.body.style.overflow = "hidden"
+  document.addEventListener("keydown", handleEditEscape)
+}
+
 async function editSelected() {
   try {
-    const checkboxes = document.querySelectorAll('tbody input[type="checkbox"]:checked')
-    if (checkboxes.length !== 1) {
+    const selectedItems = getSelectedMediaItems()
+    if (selectedItems.length !== 1) {
       showToast("Please select exactly one item to edit", "info")
       return
     }
 
-    const row    = checkboxes[0].closest("tr")
-    const cells  = row.cells
-    if (!cells || cells.length < 7) { showToast("Error: Invalid row data", "error"); return }
-
-    const orderNumber = parseInt(cells[1].textContent)
-    const title       = cells[2].textContent
-    const mediaType   = cells[6].textContent.toLowerCase()
-
-    showLoading()
-    const mediaList = await fetchMedia(mediaType)
-    hideLoading()
-
-    if (!Array.isArray(mediaList)) { showToast("Error: Failed to fetch media list", "error"); return }
-
-    let mediaItem = mediaList.find(item => item.order_number === orderNumber)
-    if (!mediaItem && title) mediaItem = mediaList.find(item => item.title === title)
-
-    if (!mediaItem) {
-      mediaItem = {
-        order_number: orderNumber,
-        title:        cells[2].textContent,
-        genre:        cells[3].textContent,
-        release_year: parseInt(cells[4].textContent.split("–")[0]) || new Date().getFullYear(),
-        rating:       parseFloat(cells[5].textContent) || 0,
-        media_type:   mediaType,
-      }
-      if (mediaType === "series") {
-        const parts = cells[4].textContent.split("–")
-        mediaItem.end_year = parts.length > 1 ? parseInt(parts[1]) : mediaItem.release_year
-      }
-    }
-
-    editOrderInput.value       = orderNumber
-    editTitleInput.value       = mediaItem.title || ""
-    editGenreInput.value       = mediaItem.genre || ""
-    editReleaseYearInput.value = mediaItem.release_year || ""
-    editRatingInput.value      = mediaItem.rating || ""
-    editMediaTypeInput.value   = mediaType
-
-    if (mediaType === "series") {
-      editEndYearGroup.style.display = "flex"
-      editEndYearInput.value = mediaItem.end_year || mediaItem.release_year || ""
-    } else {
-      editEndYearGroup.style.display = "none"
-    }
-
-    if (mediaItem.poster_url) {
-      editPosterImage.src = mediaItem.poster_url
-      editPosterImage.style.display = "block"
-      editPosterPlaceholder.style.display = "none"
-    } else {
-      editPosterImage.style.display = "none"
-      editPosterPlaceholder.style.display = "flex"
-    }
-
-    // Populate personal fields
-    if (editWatchStatusSelect) editWatchStatusSelect.value = mediaItem.watch_status || ""
-    if (editWatchDateInput)    editWatchDateInput.value    = mediaItem.watch_date
-      ? new Date(mediaItem.watch_date).toISOString().split("T")[0] : ""
-    if (editRewatchCountInput) editRewatchCountInput.value = mediaItem.rewatch_count ?? 0
-    if (editFavoriteChk)       editFavoriteChk.checked     = !!mediaItem.favorite
-    if (editNotesInput)        editNotesInput.value        = mediaItem.notes || ""
-    // Auto-expand personal section if any personal data exists
-    const hasPersonal = mediaItem.watch_status || mediaItem.notes || mediaItem.favorite || mediaItem.watch_date
-    if (hasPersonal) {
-      const editModal = document.getElementById("edit-modal")
-      const psSection = editModal?.querySelector(".personal-section")
-      if (psSection) psSection.classList.add("personal-section--open")
-    }
-
-    if (!hasPersonal) {
-      editModal?.querySelector(".personal-section")?.classList.remove("personal-section--open")
-    }
-
-    // Show edit modal with flex for centering
-    editModal.style.display = "flex"
-    editModal.style.alignItems = "center"
-    editModal.style.justifyContent = "center"
-    document.body.style.overflow = "hidden"
-    document.addEventListener("keydown", handleEditEscape)
-
+    // Open instantly from the already-loaded collection; no backend fetch is needed.
+    openEditModalForItem(selectedItems[0])
   } catch(error) {
-    hideLoading()
     showToast("Error editing item: " + error.message, "error")
   }
 }
@@ -2607,20 +2676,17 @@ async function saveChanges(e) {
 // ════════════════════════════════════════════════
 
 async function deleteSelected() {
-  const checkboxes = document.querySelectorAll('tbody input[type="checkbox"]:checked')
-  if (checkboxes.length === 0) {
+  const selectedItems = getSelectedMediaItems()
+  if (selectedItems.length === 0) {
     showToast("Please select at least one item to delete", "info")
     return
   }
-  if (!confirm(`Delete ${checkboxes.length} item(s) from your vault?`)) return
+  if (!confirm(`Delete ${selectedItems.length} item(s) from your vault?`)) return
 
-  const targets = Array.from(checkboxes).map(cb => {
-    const cells = cb.closest("tr").cells
-    return {
-      orderNumber: parseInt(cells[1].textContent),
-      mediaType: cells[6].textContent.toLowerCase(),
-    }
-  })
+  const targets = selectedItems.map(item => ({
+    orderNumber: Number(item.order_number),
+    mediaType: item.media_type,
+  }))
 
   try {
     showLoading()
