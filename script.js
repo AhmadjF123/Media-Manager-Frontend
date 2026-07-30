@@ -2828,8 +2828,8 @@ async function addMedia(e) {
       applyLocalMediaInsert(savedItem)
       // Redraws the hidden Collection view from memory; no second backend request.
       await searchMedia({ showSkeleton: false })
-      showToast(`"${title}" added to your vault! 🎬`, "success")
-      clearForm()
+      clearForm(false)
+      showToast(`Saved successfully — "${title}" was added to your vault! 🎬`, "success")
       // Stay on Add New so another title can be added immediately.
     } else {
       showToast("Failed to add media", "error")
@@ -2839,7 +2839,7 @@ async function addMedia(e) {
   }
 }
 
-function clearForm() {
+function clearForm(showNotification = true) {
   addForm.reset()
   document.querySelector("#view-add .personal-section")?.classList.remove("personal-section--open")
   posterImage.src = ""
@@ -2853,7 +2853,7 @@ function clearForm() {
   if (rewatchCountInput)  rewatchCountInput.value = ""
   if (favoriteChk)        favoriteChk.checked     = false
   if (notesInput)         notesInput.value        = ""
-  showToast("Form cleared", "info")
+  if (showNotification) showToast("Form cleared", "info")
 }
 
 // ════════════════════════════════════════════════
