@@ -55,6 +55,8 @@ const genreInput        = document.getElementById("genre")
 const releaseYearInput  = document.getElementById("release-year")
 const endYearInput      = document.getElementById("end-year")
 const endYearGroup      = document.getElementById("end-year-group")
+const seasonsInput      = document.getElementById("number-of-seasons")
+const seasonsGroup      = document.getElementById("seasons-group")
 const ratingInput       = document.getElementById("rating")
 const mediaTypeSelect   = document.getElementById("media-type")
 const autoFillBtn       = document.getElementById("auto-fill-btn")
@@ -70,6 +72,8 @@ const editGenreInput    = document.getElementById("edit-genre")
 const editReleaseYearInput = document.getElementById("edit-release-year")
 const editEndYearInput  = document.getElementById("edit-end-year")
 const editEndYearGroup  = document.getElementById("edit-end-year-group")
+const editSeasonsInput  = document.getElementById("edit-number-of-seasons")
+const editSeasonsGroup  = document.getElementById("edit-seasons-group")
 const editRatingInput   = document.getElementById("edit-rating")
 const editMediaTypeInput = document.getElementById("edit-media-type")
 const editAutoFillBtn   = document.getElementById("edit-auto-fill-btn")
@@ -711,9 +715,11 @@ function toggleTheme(e) {
 }
 
 function updateEndYearVisibility() {
-  if (endYearGroup) {
-    endYearGroup.style.display = mediaTypeSelect.value === "series" ? "flex" : "none"
-  }
+  const isSeries = mediaTypeSelect.value === "series"
+  if (endYearGroup) endYearGroup.style.display = isSeries ? "flex" : "none"
+  if (seasonsGroup) seasonsGroup.style.display = isSeries ? "flex" : "none"
+  if (isSeries && seasonsInput && !seasonsInput.value) seasonsInput.value = "1"
+  if (!isSeries && seasonsInput) seasonsInput.value = ""
 }
 
 function toggleSelectAll() {
@@ -2016,9 +2022,13 @@ function showDetailModal(item) {
   document.getElementById("detail-title").textContent = item.title
 
   // Meta chips
+  const savedSeasons = item.media_type === "series" && Number(item.number_of_seasons) > 0
+    ? Number(item.number_of_seasons)
+    : 0
   document.getElementById("detail-meta").innerHTML = `
     <span class="meta-chip"><i class="fas fa-calendar"></i> ${item.display_year}</span>
     <span class="meta-chip"><i class="fas fa-hashtag"></i> #${item.order_number}</span>
+    ${savedSeasons ? `<span class="meta-chip"><i class="fas fa-layer-group"></i> ${savedSeasons} season${savedSeasons === 1 ? "" : "s"}</span>` : ""}
   `
 
   // Stars
@@ -2139,7 +2149,7 @@ function showDetailModal(item) {
           const label = h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`
           return `<span class="meta-chip"><i class="fas fa-clock"></i> ${label}</span>`
         })()
-      : tmdb.number_of_seasons
+      : !savedSeasons && tmdb.number_of_seasons
         ? `<span class="meta-chip"><i class="fas fa-layer-group"></i> ${tmdb.number_of_seasons} season${tmdb.number_of_seasons > 1 ? "s" : ""}</span>`
         : ""
 
@@ -2807,6 +2817,12 @@ async function addMedia(e) {
       const endYear = endYearInput.value.trim() ? parseInt(endYearInput.value) : releaseYear
       if (endYear < releaseYear) { showToast("End year must be ≥ release year", "error"); return }
       newMedia.end_year = endYear
+      const numberOfSeasons = parseInt(seasonsInput?.value)
+      if (!Number.isInteger(numberOfSeasons) || numberOfSeasons < 1) {
+        showToast("Seasons must be a whole number of at least 1", "error")
+        return
+      }
+      newMedia.number_of_seasons = numberOfSeasons
     }
 
     // ── Duplicate check ──
@@ -2896,8 +2912,9 @@ async function fetchMediaInfo() {
     releaseYearInput.value = info.release_year
     ratingInput.value      = info.rating
 
-    if (mediaType === "series" && info.end_year) {
-      endYearInput.value = info.end_year
+    if (mediaType === "series") {
+      if (info.end_year) endYearInput.value = info.end_year
+      if (seasonsInput && info.number_of_seasons) seasonsInput.value = info.number_of_seasons
     }
 
     if (info.poster_url) {
@@ -2988,6 +3005,7 @@ async function searchSeriesInfo(searchTitle) {
       title:        details.name || "",
       release_year: parsedStart,
       end_year:     parsedEnd,
+      number_of_seasons: Math.max(1, parseInt(details.number_of_seasons) || 1),
       genre:        genres.join(", "),
       rating,
       poster_url:   details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
@@ -3036,10 +3054,14 @@ function openEditModalForItem(mediaItem) {
 
   if (mediaType === "series") {
     editEndYearGroup.style.display = "flex"
+    editSeasonsGroup.style.display = "flex"
     editEndYearInput.value = mediaItem.end_year || mediaItem.release_year || ""
+    editSeasonsInput.value = mediaItem.number_of_seasons || ""
   } else {
     editEndYearGroup.style.display = "none"
+    editSeasonsGroup.style.display = "none"
     editEndYearInput.value = ""
+    editSeasonsInput.value = ""
   }
 
   if (mediaItem.poster_url) {
@@ -3122,7 +3144,10 @@ async function fetchEditInfo() {
     editReleaseYearInput.value = info.release_year
     editRatingInput.value      = info.rating
 
-    if (mediaType === "series" && info.end_year) editEndYearInput.value = info.end_year
+    if (mediaType === "series") {
+      if (info.end_year) editEndYearInput.value = info.end_year
+      if (info.number_of_seasons) editSeasonsInput.value = info.number_of_seasons
+    }
 
     if (info.poster_url) {
       editPosterImage.src = info.poster_url
@@ -3172,6 +3197,12 @@ async function saveChanges(e) {
       const endYear = parseInt(editEndYearInput.value) || releaseYear
       if (endYear < releaseYear) { showToast("End year must be ≥ release year", "error"); return }
       updatedMedia.end_year = endYear
+      const numberOfSeasons = parseInt(editSeasonsInput.value)
+      if (!Number.isInteger(numberOfSeasons) || numberOfSeasons < 1) {
+        showToast("Seasons must be a whole number of at least 1", "error")
+        return
+      }
+      updatedMedia.number_of_seasons = numberOfSeasons
     }
 
     if (saveButton) {
