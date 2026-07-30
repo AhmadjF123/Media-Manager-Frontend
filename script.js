@@ -125,12 +125,48 @@ const titleCollator = new Intl.Collator(undefined, { sensitivity: "base", numeri
 let sortState = loadSortState()
 
 // ── Cache layer (avoids redundant network calls) ──
-const _cache = { data: null, ts: 0, TTL: 60_000 }   // 60s cache
+const _cache = { data: null, ts: 0, TTL: 60_000 }   // 60s in-memory cache
+const COLLECTION_SNAPSHOT_PREFIX = "cinema_collection_snapshot_v2"
+const COLLECTION_SNAPSHOT_MAX_AGE = 7 * 24 * 60 * 60 * 1000
+
 function _cacheGet()          { return (Date.now() - _cache.ts < _cache.TTL) ? _cache.data : null }
 function _cacheSet(data)      { _cache.data = data; _cache.ts = Date.now() }
 function _cacheInvalidate() {
   _cache.ts = 0
   _actorVaultCandidatesCache.clear()
+}
+
+function getCollectionSnapshotKey() {
+  const username = currentUser?.username || localStorage.getItem("cinema_username") || "guest"
+  return `${COLLECTION_SNAPSHOT_PREFIX}:${username.toLowerCase()}`
+}
+
+function saveCollectionSnapshot(items) {
+  if (!currentUser || !Array.isArray(items)) return
+  try {
+    localStorage.setItem(getCollectionSnapshotKey(), JSON.stringify({
+      savedAt: Date.now(),
+      items,
+    }))
+  } catch (_) {
+    // Storage can be full or disabled; the normal network path still works.
+  }
+}
+
+function readCollectionSnapshot() {
+  if (!currentUser) return null
+  try {
+    const parsed = JSON.parse(localStorage.getItem(getCollectionSnapshotKey()) || "null")
+    if (!parsed || !Array.isArray(parsed.items)) return null
+    if (Date.now() - Number(parsed.savedAt || 0) > COLLECTION_SNAPSHOT_MAX_AGE) return null
+    return parsed.items
+  } catch (_) {
+    return null
+  }
+}
+
+function clearCollectionSnapshot() {
+  try { localStorage.removeItem(getCollectionSnapshotKey()) } catch (_) {}
 }
 
 // ════════════════════════════════════════════════
@@ -181,12 +217,12 @@ function hideSkeletons() {
 }
 
 // ── Fetch ALL media in one request (with cache) ──
-async function fetchAllMedia({ showSkeleton = true } = {}) {
+async function fetchAllMedia({ showSkeleton = true, force = false } = {}) {
   // Guest users have no collection
   if (!currentUser) return []
 
   const cached = _cacheGet()
-  if (cached) return cached
+  if (!force && cached) return cached
 
   try {
     // Normal collection loads use skeletons. Background cast matching stays invisible.
@@ -212,9 +248,14 @@ async function fetchAllMedia({ showSkeleton = true } = {}) {
       rating:       parseFloat(item.rating)     || 0,
     }))
     _cacheSet(normalised)
+    saveCollectionSnapshot(normalised)
     return normalised
   } catch(error) {
     if (showSkeleton) hideSkeletons()
+    if (Array.isArray(cached) && cached.length) {
+      showToast("Showing your saved collection while the server reconnects", "info")
+      return cached
+    }
     showToast(`Error fetching media: ${error.message}`, "error")
     return []
   }
@@ -299,17 +340,39 @@ async function deleteMedia(mediaType, orderNumber) {
 //  CORE FUNCTIONS
 // ════════════════════════════════════════════════
 
-async function init() {
-  // ── Auth: restore session ──
-  await restoreSession()
+function applySavedTheme() {
+  const light = localStorage.getItem("darkMode") === "false"
+  document.documentElement.dataset.theme = light ? "light" : "dark"
+  document.documentElement.style.colorScheme = light ? "light" : "dark"
+  document.documentElement.style.backgroundColor = light ? "#f0ede8" : "#06060e"
+  document.body.classList.toggle("light-theme", light)
+  if (themeCheckbox) themeCheckbox.checked = light
+}
 
-  // Theme
-  if (localStorage.getItem("darkMode") === "false") {
-    document.body.classList.add("light-theme")
-    themeCheckbox.checked = true
-  } else {
-    themeCheckbox.checked = false
-  }
+function hydrateCollectionSnapshot() {
+  const snapshot = readCollectionSnapshot()
+  if (!snapshot?.length) return false
+
+  const normalised = snapshot.map(item => ({
+    ...item,
+    order_number: parseInt(item.order_number) || 0,
+    release_year: parseInt(item.release_year) || 0,
+    end_year: parseInt(item.end_year) || 0,
+    rating: parseFloat(item.rating) || 0,
+  }))
+
+  _cacheSet(normalised)
+  document.body.classList.add("instant-hydrate")
+  updateResultsTable(prepareDisplayResults(normalised))
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    document.body.classList.remove("instant-hydrate")
+  }))
+  return true
+}
+
+async function init() {
+  // Apply the saved theme before any network work, so refresh never flashes the opposite theme.
+  applySavedTheme()
   themeCheckbox.addEventListener("change", toggleTheme)
 
   initFancySearchSelects()
@@ -317,14 +380,21 @@ async function init() {
   bindDatePickerButtons()
   bindSortControls()
   updateSortUI()
-  await searchMedia()
 
-  // Event listeners
-  searchBtn.addEventListener("click", searchMedia)
+  // restoreSession sets currentUser synchronously, then verifies the token in parallel.
+  const sessionVerification = restoreSession()
+  const hydrated = hydrateCollectionSnapshot()
+
+  // Start the real collection request immediately; cached cards remain visible while it refreshes.
+  const initialCollectionLoad = searchMedia({ forceRefresh: true, showSkeleton: !hydrated })
+  void sessionVerification
+
+  // Bind controls immediately instead of waiting for the backend response.
+  searchBtn.addEventListener("click", () => searchMedia())
   searchInput.addEventListener("keypress", e => { if(e.key==="Enter") searchMedia() })
   searchInput.addEventListener("input", handleCollectionSearchInput)
   searchBySelect.addEventListener("change", handleSearchModeChange)
-  filterTypeSelect.addEventListener("change", searchMedia)
+  filterTypeSelect.addEventListener("change", () => searchMedia())
   actorClearBtn?.addEventListener("click", clearActorSearch)
   actorCopyBtn?.addEventListener("click", copyActorRecommendationList)
   document.addEventListener("click", event => {
@@ -363,6 +433,8 @@ async function init() {
   window.addEventListener("click", e => {
     if (e.target === editModal) closeModal()
   })
+
+  await initialCollectionLoad
 }
 
 // ── Accordion toggle for Personal Notes section ──
@@ -395,13 +467,12 @@ function toggleTheme(e) {
   kill.textContent = "*,*::before,*::after{transition:none!important;animation:none!important}"
   document.head.appendChild(kill)
 
-  if (e.target.checked) {
-    document.body.classList.add("light-theme")
-    localStorage.setItem("darkMode", "false")
-  } else {
-    document.body.classList.remove("light-theme")
-    localStorage.setItem("darkMode", "true")
-  }
+  const light = Boolean(e.target.checked)
+  document.body.classList.toggle("light-theme", light)
+  document.documentElement.dataset.theme = light ? "light" : "dark"
+  document.documentElement.style.colorScheme = light ? "light" : "dark"
+  document.documentElement.style.backgroundColor = light ? "#f0ede8" : "#06060e"
+  localStorage.setItem("darkMode", light ? "false" : "true")
 
   // Re-enable after two frames (browser has committed the paint)
   requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -679,7 +750,9 @@ function bindSortControls() {
 //  SEARCH & DISPLAY
 // ════════════════════════════════════════════════
 
-async function searchMedia() {
+async function searchMedia(options = {}) {
+  const forceRefresh = Boolean(options?.forceRefresh)
+  const showSkeleton = options?.showSkeleton !== false
   const rawSearchQuery = searchInput.value.trim()
   const searchBy       = searchBySelect.value
   const filterType     = filterTypeSelect.value
@@ -705,7 +778,7 @@ async function searchMedia() {
   }
 
   try {
-    const all = await fetchAllMedia()
+    const all = await fetchAllMedia({ showSkeleton, force: forceRefresh })
 
     let results = all.filter(item => {
       // Type filter
@@ -1420,12 +1493,13 @@ function clearCollectionSearch() {
 }
 window.clearCollectionSearch = clearCollectionSearch
 
-function updateResultsTable(results) {
-  currentResults = results
-
-  // ── Table rows ──
+function renderCurrentTableRows() {
+  if (!resultsBody) return
   resultsBody.innerHTML = ""
-  results.forEach(item => {
+  if (currentGridMode !== "list") return
+
+  const fragment = document.createDocumentFragment()
+  currentResults.forEach(item => {
     const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0
     const row = document.createElement("tr")
     row.innerHTML = `
@@ -1440,8 +1514,17 @@ function updateResultsTable(results) {
       <td>${rating.toFixed(1)}</td>
       <td>${escapeHtml(item.media_type)}</td>
     `
-    resultsBody.appendChild(row)
+    fragment.appendChild(row)
   })
+  resultsBody.appendChild(fragment)
+}
+
+function updateResultsTable(results) {
+  currentResults = results
+
+  // ── Table rows ──
+  // Avoid creating hundreds of hidden rows while Grid View is active.
+  renderCurrentTableRows()
 
   // Status
   if (statusLabel) {
@@ -1515,7 +1598,7 @@ function updateEmptyStateCopy(results) {
 let _cardPool = []
 let _cardRendered = 0
 let _cardObserver = null
-const CARD_BATCH = 40
+const CARD_BATCH = 28
 
 function buildMediaCard(item, index) {
   const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0
@@ -1965,11 +2048,13 @@ function toggleGridView(mode) {
     tbl.style.display  = "none"
     gridBtn.classList.add("active")
     listBtn.classList.remove("active")
+    if (resultsBody) resultsBody.innerHTML = ""
   } else {
     grid.style.display = "none"
     tbl.style.display  = "block"
     gridBtn.classList.remove("active")
     listBtn.classList.add("active")
+    renderCurrentTableRows()
   }
 }
 window.toggleGridView = toggleGridView
@@ -2549,6 +2634,7 @@ function updateAuthUI(user) {
 
 // ── Handle expired / invalid token ──
 function handleUnauthorized() {
+  clearCollectionSnapshot()
   clearToken()
   currentUser = null
   _cacheInvalidate()
@@ -2708,6 +2794,7 @@ window.submitRegister = submitRegister
 
 // ── Logout ──
 function logout() {
+  clearCollectionSnapshot()
   clearToken()
   currentUser = null
   _cacheInvalidate()

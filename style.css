@@ -26,6 +26,7 @@
   --transition:  0.3s cubic-bezier(0.4,0,0.2,1);
 }
 
+html[data-theme="light"] body,
 body.light-theme {
   --bg:         #f0ede8;
   --surface:    #e8e4dc;
@@ -41,7 +42,14 @@ body.light-theme {
 /* ── Reset ── */
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; background: #06060e; }
+html[data-theme="light"] { background: #f0ede8; }
+html.theme-preloaded *,
+html.theme-preloaded *::before,
+html.theme-preloaded *::after {
+  transition: none !important;
+  animation: none !important;
+}
 
 body {
   font-family: 'Outfit', sans-serif;
@@ -3878,4 +3886,12 @@ body.light-theme .sort-option.active { background: linear-gradient(105deg, rgba(
   .actor-match-count { margin-left: 72px; }
   .actor-copy-btn span { display: none; }
   .actor-copy-btn { width: 34px; padding: 0; }
+}
+
+
+/* Instant refresh path: no decorative shuffle while restoring cached cards. */
+body.instant-hydrate .media-card,
+body.instant-hydrate .card-grid.is-reordering .media-card {
+  animation: none !important;
+  transition: none !important;
 }

@@ -5,6 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cinéma — Media Vault</title>
 
+    <script>
+      (() => {
+        try {
+          const light = localStorage.getItem("darkMode") === "false";
+          document.documentElement.dataset.theme = light ? "light" : "dark";
+          document.documentElement.classList.add("theme-preloaded");
+          document.documentElement.style.colorScheme = light ? "light" : "dark";
+          document.documentElement.style.backgroundColor = light ? "#f0ede8" : "#06060e";
+        } catch (_) {}
+      })();
+    </script>
+
+    <link rel="preconnect" href="https://media-manager-backend-wfeb.onrender.com" crossorigin />
+    <link rel="preconnect" href="https://image.tmdb.org" crossorigin />
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin />
+
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
@@ -13,6 +29,15 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <script>
+      (() => {
+        const light = document.documentElement.dataset.theme === "light";
+        document.body.classList.toggle("light-theme", light);
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          document.documentElement.classList.remove("theme-preloaded");
+        }));
+      })();
+    </script>
     <!-- Ambient orbs -->
     <div class="ambient">
       <div class="orb o1"></div>
