@@ -70,6 +70,10 @@
           <button class="nav-pill" id="nav-add" onclick="switchView('add')">
             <i class="fas fa-plus"></i><span>Add New</span>
           </button>
+          <button class="nav-pill nav-friends" id="nav-social" onclick="switchView('social')">
+            <i class="fas fa-user-group"></i><span>Friends</span>
+            <b id="social-request-badge" class="nav-notification-badge" hidden>0</b>
+          </button>
         </nav>
 
         <!-- Auth Button -->
@@ -589,6 +593,154 @@
           </div>
         </div>
       </section>
+
+      <!-- ═══════════ FRIENDS & SHARING VIEW ═══════════ -->
+      <section class="view social-view" id="view-social" style="display: none">
+        <div class="social-shell">
+          <section class="social-hero">
+            <div class="social-hero-copy">
+              <span class="social-kicker"><i class="fas fa-users"></i> Private social vault</span>
+              <h1>Friends &amp; Sharing</h1>
+              <p>Find people by their unique username, connect safely, and decide exactly what each friend can see.</p>
+            </div>
+            <div class="social-profile-card">
+              <div class="social-profile-avatar" id="social-profile-avatar">U</div>
+              <div>
+                <span>Your public handle</span>
+                <strong id="social-profile-username">@username</strong>
+              </div>
+              <button type="button" class="social-icon-btn" onclick="activateSocialTab('settings')" title="Privacy settings">
+                <i class="fas fa-sliders"></i>
+              </button>
+            </div>
+          </section>
+
+          <nav class="social-tabs" aria-label="Friends sections">
+            <button type="button" class="social-tab active" data-social-tab="people" onclick="activateSocialTab('people')"><i class="fas fa-magnifying-glass"></i><span>Find People</span></button>
+            <button type="button" class="social-tab" data-social-tab="requests" onclick="activateSocialTab('requests')"><i class="fas fa-bell"></i><span>Requests</span><b id="requests-tab-count" hidden>0</b></button>
+            <button type="button" class="social-tab" data-social-tab="friends" onclick="activateSocialTab('friends')"><i class="fas fa-user-group"></i><span>Friends</span></button>
+            <button type="button" class="social-tab" data-social-tab="invite" onclick="activateSocialTab('invite')"><i class="fas fa-ticket"></i><span>Invite Code</span></button>
+            <button type="button" class="social-tab" data-social-tab="settings" onclick="activateSocialTab('settings')"><i class="fas fa-shield-halved"></i><span>Privacy</span></button>
+          </nav>
+
+          <div id="social-main-panels">
+            <section class="social-panel active" data-social-panel="people">
+              <div class="social-panel-heading">
+                <div><span>Discover</span><h2>Find someone</h2><p>Search by the exact or beginning of a unique username.</p></div>
+              </div>
+              <div class="people-search-box">
+                <span class="people-at">@</span>
+                <input id="people-search-input" type="text" maxlength="20" autocomplete="off" placeholder="username" aria-label="Search by username" />
+                <button type="button" id="people-search-btn"><i class="fas fa-search"></i><span>Search</span></button>
+              </div>
+              <div id="people-search-status" class="social-inline-status">Start typing a username to discover people.</div>
+              <div id="people-results" class="people-results"></div>
+            </section>
+
+            <section class="social-panel" data-social-panel="requests" hidden>
+              <div class="social-panel-heading">
+                <div><span>Connections</span><h2>Friend requests</h2><p>Accept people you know or cancel requests you sent.</p></div>
+                <button type="button" class="social-refresh-btn" onclick="loadSocialRequests(true)"><i class="fas fa-rotate"></i> Refresh</button>
+              </div>
+              <div class="requests-columns">
+                <article class="request-column">
+                  <h3><i class="fas fa-inbox"></i> Incoming <b id="incoming-count">0</b></h3>
+                  <div id="incoming-requests" class="social-list"></div>
+                </article>
+                <article class="request-column">
+                  <h3><i class="fas fa-paper-plane"></i> Sent <b id="outgoing-count">0</b></h3>
+                  <div id="outgoing-requests" class="social-list"></div>
+                </article>
+              </div>
+            </section>
+
+            <section class="social-panel" data-social-panel="friends" hidden>
+              <div class="social-panel-heading">
+                <div><span>Your circle</span><h2>Friends</h2><p>Open a shared vault or control what you share with each person.</p></div>
+                <button type="button" class="social-refresh-btn" onclick="loadSocialFriends(true)"><i class="fas fa-rotate"></i> Refresh</button>
+              </div>
+              <div id="friends-grid" class="friends-grid"></div>
+            </section>
+
+            <section class="social-panel" data-social-panel="invite" hidden>
+              <div class="social-panel-heading">
+                <div><span>Quick connection</span><h2>Invite code</h2><p>Create a one-time code that expires after 24 hours, or enter a code someone sent you.</p></div>
+              </div>
+              <div class="invite-grid">
+                <article class="invite-card">
+                  <div class="invite-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
+                  <h3>Create an invite</h3>
+                  <p>The code works once and only creates a friend request. You still control acceptance and sharing.</p>
+                  <button type="button" class="social-primary-btn" id="create-invite-btn" onclick="createInviteCode()"><i class="fas fa-ticket"></i> Generate Code</button>
+                  <div id="generated-invite" class="generated-invite" hidden>
+                    <code id="generated-invite-code"></code>
+                    <button type="button" onclick="copyInviteCode()"><i class="fas fa-copy"></i></button>
+                    <small id="generated-invite-expiry"></small>
+                  </div>
+                </article>
+                <article class="invite-card">
+                  <div class="invite-icon"><i class="fas fa-key"></i></div>
+                  <h3>Use an invite</h3>
+                  <p>Paste the code exactly as received. A request will be sent to its owner.</p>
+                  <div class="join-code-row">
+                    <input id="join-invite-code" type="text" autocomplete="off" placeholder="CINEMA-XXXXXXXX" />
+                    <button type="button" class="social-primary-btn" onclick="joinInviteCode()">Join</button>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section class="social-panel" data-social-panel="settings" hidden>
+              <div class="social-panel-heading">
+                <div><span>Privacy first</span><h2>Discovery settings</h2><p>Your email is never shown. These switches control only your public username.</p></div>
+              </div>
+              <div class="privacy-settings-card">
+                <label class="privacy-setting-row">
+                  <span class="privacy-setting-icon"><i class="fas fa-magnifying-glass"></i></span>
+                  <span><strong>Allow people to find me</strong><small>Show my @username in People search.</small></span>
+                  <input id="setting-discoverable" type="checkbox" />
+                  <i class="privacy-switch"></i>
+                </label>
+                <label class="privacy-setting-row">
+                  <span class="privacy-setting-icon"><i class="fas fa-user-plus"></i></span>
+                  <span><strong>Accept friend requests</strong><small>People can send a request from search or an invite code.</small></span>
+                  <input id="setting-friend-requests" type="checkbox" />
+                  <i class="privacy-switch"></i>
+                </label>
+                <button type="button" class="social-primary-btn privacy-save-btn" onclick="saveSocialSettings()"><i class="fas fa-floppy-disk"></i> Save Privacy Settings</button>
+              </div>
+              <div class="blocked-section">
+                <div class="social-panel-heading compact"><div><span>Safety</span><h2>Blocked users</h2></div></div>
+                <div id="blocked-users" class="social-list"></div>
+              </div>
+            </section>
+          </div>
+
+          <section id="friend-vault-panel" class="friend-vault-panel" hidden>
+            <button type="button" class="friend-vault-back" onclick="closeFriendVault()"><i class="fas fa-arrow-left"></i> Back to friends</button>
+            <div class="friend-vault-hero">
+              <div class="friend-vault-avatar" id="friend-vault-avatar">F</div>
+              <div><span>Shared vault</span><h2 id="friend-vault-name">@friend</h2><p id="friend-vault-access">Loading shared collection…</p></div>
+              <div class="friend-vault-stats">
+                <div><strong id="friend-stat-total">0</strong><span>Visible</span></div>
+                <div><strong id="friend-stat-movies">0</strong><span>Movies</span></div>
+                <div><strong id="friend-stat-series">0</strong><span>Series</span></div>
+              </div>
+            </div>
+            <div class="friend-vault-toolbar">
+              <div class="friend-vault-filter" role="tablist">
+                <button type="button" class="active" data-shared-filter="all">All</button>
+                <button type="button" data-shared-filter="watching">Watching</button>
+                <button type="button" data-shared-filter="watched">Watched</button>
+                <button type="button" data-shared-filter="favorites">Favorites</button>
+              </div>
+              <div class="friend-vault-search"><i class="fas fa-search"></i><input id="friend-vault-search" type="text" placeholder="Search this shared vault…" /></div>
+            </div>
+            <div id="friend-vault-grid" class="shared-vault-grid"></div>
+            <div id="friend-vault-empty" class="social-empty" hidden><i class="fas fa-eye-slash"></i><h3>Nothing visible here yet</h3><p>This friend may not have matching titles, or has not shared this category.</p></div>
+          </section>
+        </div>
+      </section>
     </div>
     <!-- /app -->
 
@@ -896,6 +1048,26 @@
       </div>
     </div>
 
+
+    <!-- ═══════════ SHARING PERMISSIONS MODAL ═══════════ -->
+    <div id="sharing-modal" class="sharing-overlay" hidden>
+      <div class="sharing-box" role="dialog" aria-modal="true" aria-labelledby="sharing-modal-title">
+        <button type="button" class="sharing-close" onclick="closeSharingModal()"><i class="fas fa-times"></i></button>
+        <span class="social-kicker"><i class="fas fa-shield-halved"></i> Per-friend privacy</span>
+        <h2 id="sharing-modal-title">Share with @friend</h2>
+        <p>Choose what this person can see in your vault. Personal notes are always private.</p>
+        <div class="sharing-options">
+          <label><span><i class="fas fa-play"></i><b>Currently watching</b><small>Titles marked Watching</small></span><input id="perm-watching" type="checkbox"><i></i></label>
+          <label><span><i class="fas fa-circle-check"></i><b>Watched titles</b><small>Titles marked Watched</small></span><input id="perm-watched" type="checkbox"><i></i></label>
+          <label><span><i class="fas fa-heart"></i><b>Favorites</b><small>Anything marked Favourite</small></span><input id="perm-favorites" type="checkbox"><i></i></label>
+          <label><span><i class="fas fa-star"></i><b>My ratings</b><small>Show your personal score</small></span><input id="perm-ratings" type="checkbox"><i></i></label>
+          <label class="sharing-full"><span><i class="fas fa-vault"></i><b>Full collection</b><small>Share every saved title regardless of status</small></span><input id="perm-full" type="checkbox"><i></i></label>
+        </div>
+        <div class="sharing-note"><i class="fas fa-lock"></i> Notes are never shared. Friends have read-only access and cannot edit or delete your collection.</div>
+        <button type="button" id="save-sharing-btn" class="social-primary-btn sharing-save" onclick="saveSharingPermissions()"><i class="fas fa-check"></i> Save Sharing</button>
+      </div>
+    </div>
+
     <!-- ═══════════ AUTH MODAL ═══════════ -->
     <div id="auth-modal" class="auth-overlay" style="display:none">
       <div class="auth-box">
@@ -998,11 +1170,13 @@
               <p>Create your free account</p>
             </div>
 
-            <div class="auth-field">
-              <div class="auth-field-icon"><i class="fas fa-user"></i></div>
-              <input type="text" id="reg-username" class="auth-inp"
-                placeholder="Username" autocomplete="username"/>
+            <div class="auth-field username-auth-field">
+              <div class="auth-field-icon auth-at-icon">@</div>
+              <input type="text" id="reg-username" class="auth-inp" maxlength="20"
+                placeholder="Unique username" autocomplete="username" spellcheck="false"/>
+              <span id="username-check-icon" class="username-check-icon"></span>
             </div>
+            <div id="username-availability" class="auth-field-hint">3–20 lowercase letters, numbers, or underscores.</div>
 
             <div class="auth-field" style="margin: 10px 0">
               <div class="auth-field-icon"><i class="fas fa-envelope"></i></div>
@@ -1013,15 +1187,26 @@
             <div class="auth-field">
               <div class="auth-field-icon"><i class="fas fa-lock"></i></div>
               <input type="password" id="reg-password" class="auth-inp"
-                placeholder="Password (min. 6 chars)" autocomplete="new-password"/>
+                placeholder="Password (minimum 8 characters)" autocomplete="new-password"/>
               <button type="button" class="pw-eye" onclick="togglePwVisibility('reg-password',this)">
                 <i class="fas fa-eye"></i>
               </button>
             </div>
+            <div id="password-strength" class="password-strength"><i></i><i></i><i></i><i></i><span>Use at least 8 characters</span></div>
+
+            <div class="auth-field confirm-password-field" style="margin-top:10px">
+              <div class="auth-field-icon"><i class="fas fa-shield-check"></i></div>
+              <input type="password" id="reg-confirm-password" class="auth-inp"
+                placeholder="Confirm password" autocomplete="new-password"/>
+              <button type="button" class="pw-eye" onclick="togglePwVisibility('reg-confirm-password',this)">
+                <i class="fas fa-eye"></i>
+              </button>
+            </div>
+            <div id="password-match-status" class="auth-field-hint">Re-enter your password to confirm it.</div>
 
             <div id="auth-register-error" class="auth-error" style="display:none"></div>
 
-            <button class="auth-submit-btn" id="register-submit-btn" onclick="submitRegister()">
+            <button class="auth-submit-btn" id="register-submit-btn" onclick="submitRegister()" disabled>
               <span>Create Account</span>
               <i class="fas fa-arrow-right"></i>
             </button>

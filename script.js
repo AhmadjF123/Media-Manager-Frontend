@@ -15,9 +15,10 @@ const TMDB_BASE_URL   = "https://api.themoviedb.org/3"
 const TMDB_IMAGE_URL  = "https://image.tmdb.org/t/p/w500"
 const API_BASE_URL    = "https://media-manager-backend-wfeb.onrender.com/api/media"
 const AUTH_BASE_URL   = "https://media-manager-backend-wfeb.onrender.com/api/auth"
+const SOCIAL_BASE_URL = "https://media-manager-backend-wfeb.onrender.com/api/social"
 
 // ── Auth State ──
-let currentUser = null   // null = guest, { username, token } = logged in
+let currentUser = null   // null = guest, otherwise authenticated public profile + token
 
 function getToken()    { return localStorage.getItem("cinema_token") }
 function setToken(t)   { localStorage.setItem("cinema_token", t) }
@@ -193,7 +194,8 @@ function normaliseMediaItem(item = {}) {
     order_number: parseInt(item.order_number) || 0,
     release_year: parseInt(item.release_year) || 0,
     end_year: parseInt(item.end_year) || 0,
-    rating: parseFloat(item.rating) || 0,
+    number_of_seasons: parseInt(item.number_of_seasons) || 0,
+    rating: item.rating === null ? null : (parseFloat(item.rating) || 0),
   }
 }
 
@@ -662,6 +664,8 @@ async function init() {
     renderActorFilmography()
   })
   actorProfileModal?.addEventListener("click", handleActorProfileClick)
+
+  initSocialUI()
 
   // Edit modal close
   window.addEventListener("click", e => {
@@ -1717,7 +1721,8 @@ function renderCurrentTableRows() {
 
   const fragment = document.createDocumentFragment()
   currentResults.forEach((item, index) => {
-    const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0
+    const hasSharedRating = item.rating !== null && item.rating !== undefined && item.rating !== ""
+  const rating = hasSharedRating ? (typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0) : 0
     const row = document.createElement("tr")
     row.dataset.index = index
     row.innerHTML = `
@@ -2037,10 +2042,9 @@ function showDetailModal(item) {
   for (let i = 1; i <= 5; i++) {
     stars += `<i class="${i <= filled ? "fas" : "far"} fa-star"></i>`
   }
-  document.getElementById("detail-rating-display").innerHTML = `
-    <div class="rating-stars">${stars}</div>
-    <div class="rating-number">${rating.toFixed(1)}<span>/10</span></div>
-  `
+  document.getElementById("detail-rating-display").innerHTML = hasSharedRating
+    ? `<div class="rating-stars">${stars}</div><div class="rating-number">${rating.toFixed(1)}<span>/10</span></div>`
+    : `<div class="det-shared-readonly"><i class="fas fa-eye-slash"></i> Rating kept private</div>`
 
   // Genre tags
   const genres = item.genre.split(",").map(g => g.trim())
@@ -2053,10 +2057,15 @@ function showDetailModal(item) {
     extraEl.innerHTML = `<div class="det-extra-loading"><i class="fas fa-spinner fa-spin"></i> Loading details…</div>`
   }
 
-  // Edit button
-  document.getElementById("detail-edit-btn").onclick = () => {
-    closeDetailModal()
-    setTimeout(() => editItemDirectly(item), 200)
+  // Edit button is hidden for titles opened from a friend's read-only vault.
+  const detailEditButton = document.getElementById("detail-edit-btn")
+  const readOnlySharedTitle = Boolean(item.__shared_read_only)
+  if (detailEditButton) {
+    detailEditButton.style.display = readOnlySharedTitle ? "none" : "inline-flex"
+    detailEditButton.onclick = readOnlySharedTitle ? null : () => {
+      closeDetailModal()
+      setTimeout(() => editItemDirectly(item), 200)
+    }
   }
 
   // ── Personal section (local data, shown immediately) ──
@@ -2726,30 +2735,38 @@ function editItemDirectly(item) {
 // ════════════════════════════════════════════════
 
 function switchView(view) {
-  // Guests can't add media
-  if (view === "add" && !currentUser) {
+  // Guests can't add media or open private social features.
+  if ((view === "add" || view === "social") && !currentUser) {
     openAuthModal("login")
-    showToast("Please sign in to add titles to your vault", "info")
+    showToast(view === "social" ? "Please sign in to connect with friends" : "Please sign in to add titles to your vault", "info")
     return
   }
 
-  const colView = document.getElementById("view-collection")
-  const addView = document.getElementById("view-add")
-  const navCol  = document.getElementById("nav-collection")
-  const navAdd  = document.getElementById("nav-add")
+  const views = {
+    collection: document.getElementById("view-collection"),
+    add: document.getElementById("view-add"),
+    social: document.getElementById("view-social"),
+  }
+  const navs = {
+    collection: document.getElementById("nav-collection"),
+    add: document.getElementById("nav-add"),
+    social: document.getElementById("nav-social"),
+  }
 
-  if (view === "collection") {
-    colView.style.display = "block"
-    addView.style.display = "none"
-    navCol.classList.add("active")
-    navAdd.classList.remove("active")
-  } else {
-    // Always start Add New with Personal Notes collapsed.
-    addView.querySelector(".personal-section")?.classList.remove("personal-section--open")
-    colView.style.display = "none"
-    addView.style.display = "block"
-    navCol.classList.remove("active")
-    navAdd.classList.add("active")
+  Object.entries(views).forEach(([key, element]) => {
+    if (element) element.style.display = key === view ? "block" : "none"
+  })
+  Object.entries(navs).forEach(([key, element]) => {
+    element?.classList.toggle("active", key === view)
+  })
+
+  if (view === "add") {
+    views.add?.querySelector(".personal-section")?.classList.remove("personal-section--open")
+  }
+  if (view === "social") {
+    closeFriendVault({ silent: true })
+    syncSocialProfileUI()
+    loadSocialDashboard()
   }
 }
 window.switchView = switchView
@@ -3339,11 +3356,11 @@ document.addEventListener("DOMContentLoaded", init)
 
 // ── Restore session from localStorage ──
 async function restoreSession() {
-  const token    = getToken()
+  const token = getToken()
   const username = localStorage.getItem("cinema_username")
   if (!token) { updateAuthUI(null); return }
 
-  // Optimistically restore, then verify in background
+  // Optimistically restore, then verify and enrich the public profile in parallel.
   currentUser = { token, username: username || "User" }
   updateAuthUI(currentUser)
 
@@ -3351,11 +3368,12 @@ async function restoreSession() {
     const res = await fetch(`${AUTH_BASE_URL}/me`, { headers: authHeaders() })
     if (res.ok) {
       const data = await res.json()
-      currentUser = { token, username: data.username }
+      currentUser = { token, ...data }
       localStorage.setItem("cinema_username", data.username)
       updateAuthUI(currentUser)
+      syncSocialProfileUI()
+      updateSocialRequestBadge(Number(data.pending_requests_count) || 0)
     } else {
-      // Token expired
       handleUnauthorized()
     }
   } catch { /* offline — keep local state */ }
@@ -3363,27 +3381,29 @@ async function restoreSession() {
 
 // ── Update UI based on auth state ──
 function updateAuthUI(user) {
-  const guestBtn   = document.getElementById("auth-open-btn")
-  const userPill   = document.getElementById("user-pill")
+  const guestBtn = document.getElementById("auth-open-btn")
+  const userPill = document.getElementById("user-pill")
   const userAvatar = document.getElementById("user-avatar")
-  const userLabel  = document.getElementById("user-name-label")
+  const userLabel = document.getElementById("user-name-label")
   const guestBanner = document.getElementById("guest-banner")
-  const navAdd     = document.getElementById("nav-add")
+  const navAdd = document.getElementById("nav-add")
+  const navSocial = document.getElementById("nav-social")
 
   if (user) {
-    // Logged in
-    if (guestBtn)   guestBtn.style.display   = "none"
-    if (userPill)   userPill.style.display   = "flex"
-    if (userAvatar) userAvatar.textContent   = user.username.charAt(0).toUpperCase()
-    if (userLabel)  userLabel.textContent    = user.username
+    if (guestBtn) guestBtn.style.display = "none"
+    if (userPill) userPill.style.display = "flex"
+    if (userAvatar) userAvatar.textContent = user.username.charAt(0).toUpperCase()
+    if (userLabel) userLabel.textContent = `@${user.username}`
     if (guestBanner) guestBanner.style.display = "none"
-    if (navAdd)     navAdd.style.opacity     = "1"
+    if (navAdd) navAdd.style.opacity = "1"
+    if (navSocial) navSocial.style.opacity = "1"
   } else {
-    // Guest
-    if (guestBtn)   guestBtn.style.display   = "flex"
-    if (userPill)   userPill.style.display   = "none"
+    if (guestBtn) guestBtn.style.display = "flex"
+    if (userPill) userPill.style.display = "none"
     if (guestBanner) guestBanner.style.display = "flex"
-    if (navAdd)     navAdd.style.opacity     = "0.5"
+    if (navAdd) navAdd.style.opacity = "0.5"
+    if (navSocial) navSocial.style.opacity = "0.5"
+    updateSocialRequestBadge(0)
   }
 }
 
@@ -3392,6 +3412,7 @@ function handleUnauthorized() {
   clearCollectionSnapshot()
   clearToken()
   currentUser = null
+  resetSocialState()
   _cacheInvalidate()
   updateAuthUI(null)
   showToast("Session expired — please sign in again", "info")
@@ -3486,9 +3507,11 @@ async function submitLogin() {
     } else {
       setToken(data.token)
       localStorage.setItem("cinema_username", data.username)
-      currentUser = { token: data.token, username: data.username }
+      currentUser = { token: data.token, ...(data.user || { username: data.username }) }
       _cacheInvalidate()
       updateAuthUI(currentUser)
+      syncSocialProfileUI()
+      void refreshSocialRequestBadge()
       closeAuthModal()
       showToast(`Welcome back, ${data.username}! 🎬`, "success")
       await searchMedia()
@@ -3504,14 +3527,32 @@ window.submitLogin = submitLogin
 
 // ── Submit register ──
 async function submitRegister() {
-  const username = document.getElementById("reg-username")?.value.trim()
-  const email    = document.getElementById("reg-email")?.value.trim()
-  const password = document.getElementById("reg-password")?.value
-  const errEl    = document.getElementById("auth-register-error")
-  const btn      = document.getElementById("register-submit-btn")
+  const username = normalizeHandleInput(document.getElementById("reg-username")?.value)
+  const email = document.getElementById("reg-email")?.value.trim()
+  const password = document.getElementById("reg-password")?.value || ""
+  const confirmPassword = document.getElementById("reg-confirm-password")?.value || ""
+  const errEl = document.getElementById("auth-register-error")
+  const btn = document.getElementById("register-submit-btn")
 
-  if (!username || !email || !password) {
-    showAuthError(errEl, "All fields are required")
+  updateRegistrationValidation()
+  if (!USERNAME_PATTERN.test(username)) {
+    showAuthError(errEl, "Username must be 3–20 lowercase letters, numbers, or underscores")
+    return
+  }
+  if (!registrationState.usernameAvailable) {
+    showAuthError(errEl, "Choose an available username first")
+    return
+  }
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+    showAuthError(errEl, "Enter a valid email address")
+    return
+  }
+  if (password.length < 8) {
+    showAuthError(errEl, "Password must be at least 8 characters")
+    return
+  }
+  if (password !== confirmPassword) {
+    showAuthError(errEl, "Passwords do not match")
     return
   }
 
@@ -3519,31 +3560,34 @@ async function submitRegister() {
   btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Creating account…`
 
   try {
-    const res  = await fetch(`${AUTH_BASE_URL}/register`, {
+    const res = await fetch(`${AUTH_BASE_URL}/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, email, password })
+      body: JSON.stringify({ username, email, password, confirm_password: confirmPassword })
     })
     const data = await res.json()
 
     if (!res.ok) {
+      if (data.field === "username") registrationState.usernameAvailable = false
       showAuthError(errEl, data.error || "Registration failed")
+      updateRegistrationValidation()
     } else {
       setToken(data.token)
       localStorage.setItem("cinema_username", data.username)
-      currentUser = { token: data.token, username: data.username }
+      currentUser = { token: data.token, ...(data.user || { username: data.username }) }
       _cacheInvalidate()
       updateAuthUI(currentUser)
+      syncSocialProfileUI()
       closeAuthModal()
-      showToast(`Account created! Welcome, ${data.username} 🎉`, "success")
+      showToast(`Account created! Welcome, @${data.username} 🎉`, "success")
       await searchMedia()
     }
   } catch {
     showAuthError(errEl, "Network error — please try again")
   }
 
-  btn.disabled = false
   btn.innerHTML = `<i class="fas fa-user-plus"></i> Create Account`
+  updateRegistrationValidation()
 }
 window.submitRegister = submitRegister
 
@@ -3552,6 +3596,7 @@ function logout() {
   clearCollectionSnapshot()
   clearToken()
   currentUser = null
+  resetSocialState()
   _cacheInvalidate()
   updateAuthUI(null)
   switchView("collection")
@@ -3582,7 +3627,747 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("auth-password")?.addEventListener("keydown", e => {
     if (e.key === "Enter") submitLogin()
   })
-  document.getElementById("reg-password")?.addEventListener("keydown", e => {
-    if (e.key === "Enter") submitRegister()
+  ;["reg-username", "reg-email", "reg-password", "reg-confirm-password"].forEach(id => {
+    document.getElementById(id)?.addEventListener("input", handleRegistrationInput)
   })
+  document.getElementById("reg-confirm-password")?.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !document.getElementById("register-submit-btn")?.disabled) submitRegister()
+  })
+  updateRegistrationValidation()
 })
+// ════════════════════════════════════════════════
+//  UNIQUE USERNAME REGISTRATION
+// ════════════════════════════════════════════════
+
+const USERNAME_PATTERN = /^[a-z0-9_]{3,20}$/
+const registrationState = {
+  usernameAvailable: false,
+  checkedUsername: "",
+  requestSerial: 0,
+  debounceTimer: null,
+}
+
+function normalizeHandleInput(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^@+/, "")
+    .toLowerCase()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 20)
+}
+
+function setUsernameAvailability(message, kind = "") {
+  const hint = document.getElementById("username-availability")
+  const icon = document.getElementById("username-check-icon")
+  if (hint) {
+    hint.textContent = message
+    hint.className = `auth-field-hint ${kind}`.trim()
+  }
+  if (icon) {
+    icon.className = `username-check-icon ${kind}`.trim()
+    icon.innerHTML = kind === "valid"
+      ? `<i class="fas fa-circle-check"></i>`
+      : kind === "invalid"
+        ? `<i class="fas fa-circle-xmark"></i>`
+        : kind === "checking"
+          ? `<i class="fas fa-spinner fa-spin"></i>`
+          : ""
+  }
+}
+
+function updatePasswordStrength() {
+  const password = document.getElementById("reg-password")?.value || ""
+  const el = document.getElementById("password-strength")
+  if (!el) return 0
+  let level = 0
+  if (password.length > 0) level = 1
+  if (password.length >= 8) level = 2
+  if (password.length >= 10 && /[a-z]/.test(password) && /[A-Z]/.test(password)) level = 3
+  if (password.length >= 12 && /\d/.test(password) && /[^a-zA-Z0-9]/.test(password)) level = 4
+  el.className = `password-strength level-${level}`
+  const label = el.querySelector("span")
+  if (label) {
+    label.textContent = level === 0 ? "Use at least 8 characters"
+      : level === 1 ? "Too short"
+      : level === 2 ? "Good"
+      : level === 3 ? "Strong"
+      : "Excellent"
+  }
+  return level
+}
+
+function updatePasswordMatch() {
+  const password = document.getElementById("reg-password")?.value || ""
+  const confirm = document.getElementById("reg-confirm-password")?.value || ""
+  const status = document.getElementById("password-match-status")
+  if (!status) return false
+
+  if (!confirm) {
+    status.textContent = "Re-enter your password to confirm it."
+    status.className = "auth-field-hint"
+    return false
+  }
+  const matches = password === confirm
+  status.innerHTML = matches
+    ? `<i class="fas fa-circle-check"></i> Passwords match`
+    : `<i class="fas fa-circle-xmark"></i> Passwords do not match`
+  status.className = `auth-field-hint ${matches ? "valid" : "invalid"}`
+  return matches
+}
+
+function updateRegistrationValidation() {
+  const username = normalizeHandleInput(document.getElementById("reg-username")?.value)
+  const email = document.getElementById("reg-email")?.value.trim() || ""
+  const password = document.getElementById("reg-password")?.value || ""
+  const confirm = document.getElementById("reg-confirm-password")?.value || ""
+  const button = document.getElementById("register-submit-btn")
+  updatePasswordStrength()
+  const matches = updatePasswordMatch()
+  const valid = USERNAME_PATTERN.test(username)
+    && registrationState.usernameAvailable
+    && registrationState.checkedUsername === username
+    && /^\S+@\S+\.\S+$/.test(email)
+    && password.length >= 8
+    && confirm.length > 0
+    && matches
+  if (button && !button.querySelector(".fa-spinner")) button.disabled = !valid
+  return valid
+}
+
+async function checkUsernameAvailability(username) {
+  const serial = ++registrationState.requestSerial
+  registrationState.usernameAvailable = false
+  registrationState.checkedUsername = ""
+  setUsernameAvailability(`Checking @${username}…`, "checking")
+  updateRegistrationValidation()
+  try {
+    const response = await fetch(`${AUTH_BASE_URL}/username-availability`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username }),
+    })
+    const data = await response.json()
+    if (serial !== registrationState.requestSerial) return
+    registrationState.checkedUsername = username
+    registrationState.usernameAvailable = Boolean(response.ok && data.available)
+    setUsernameAvailability(
+      registrationState.usernameAvailable
+        ? `@${username} is available`
+        : (data.error || `@${username} is already taken`),
+      registrationState.usernameAvailable ? "valid" : "invalid"
+    )
+  } catch {
+    if (serial !== registrationState.requestSerial) return
+    registrationState.checkedUsername = ""
+    registrationState.usernameAvailable = false
+    setUsernameAvailability("Could not check the username. Try again.", "invalid")
+  }
+  updateRegistrationValidation()
+}
+
+function handleRegistrationInput(event) {
+  const err = document.getElementById("auth-register-error")
+  if (err) err.style.display = "none"
+
+  if (event?.target?.id === "reg-username") {
+    const normalized = normalizeHandleInput(event.target.value)
+    if (event.target.value !== normalized) event.target.value = normalized
+    window.clearTimeout(registrationState.debounceTimer)
+    registrationState.requestSerial += 1
+    registrationState.usernameAvailable = false
+    registrationState.checkedUsername = ""
+    if (!normalized) {
+      setUsernameAvailability("3–20 lowercase letters, numbers, or underscores.")
+    } else if (!USERNAME_PATTERN.test(normalized)) {
+      setUsernameAvailability("Username must contain 3–20 valid characters.", "invalid")
+    } else {
+      setUsernameAvailability(`Checking @${normalized}…`, "checking")
+      registrationState.debounceTimer = window.setTimeout(() => checkUsernameAvailability(normalized), 330)
+    }
+  }
+  updateRegistrationValidation()
+}
+
+// ════════════════════════════════════════════════
+//  FRIENDS, PEOPLE SEARCH & PRIVATE SHARING
+// ════════════════════════════════════════════════
+
+const socialState = {
+  loaded: false,
+  loading: false,
+  activeTab: "people",
+  friends: [],
+  requests: { incoming: [], outgoing: [] },
+  blocked: [],
+  searchResults: [],
+  searchTimer: null,
+  searchSerial: 0,
+  permissionFriend: null,
+  sharedOwner: null,
+  sharedItems: [],
+  sharedPermissions: null,
+  sharedFilter: "all",
+}
+
+function resetSocialState() {
+  socialState.loaded = false
+  socialState.loading = false
+  socialState.activeTab = "people"
+  socialState.friends = []
+  socialState.requests = { incoming: [], outgoing: [] }
+  socialState.blocked = []
+  socialState.searchResults = []
+  socialState.permissionFriend = null
+  socialState.sharedOwner = null
+  socialState.sharedItems = []
+  socialState.sharedPermissions = null
+  socialState.sharedFilter = "all"
+  closeSharingModal()
+  closeFriendVault({ silent: true })
+}
+
+async function socialFetch(path, options = {}) {
+  const response = await fetch(`${SOCIAL_BASE_URL}${path}`, {
+    ...options,
+    headers: { ...authHeaders(), ...(options.headers || {}) },
+  })
+  if (response.status === 401) {
+    handleUnauthorized()
+    throw new Error("Session expired")
+  }
+  let data = null
+  try { data = await response.json() } catch { data = {} }
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`)
+  return data
+}
+
+function syncSocialProfileUI() {
+  const username = currentUser?.username || "username"
+  const usernameEl = document.getElementById("social-profile-username")
+  const avatar = document.getElementById("social-profile-avatar")
+  if (usernameEl) usernameEl.textContent = `@${username}`
+  if (avatar) avatar.textContent = username.charAt(0).toUpperCase()
+  const discoverable = document.getElementById("setting-discoverable")
+  const requests = document.getElementById("setting-friend-requests")
+  if (discoverable) discoverable.checked = currentUser?.discoverable !== false
+  if (requests) requests.checked = currentUser?.allow_friend_requests !== false
+}
+
+function updateSocialRequestBadge(count) {
+  const value = Math.max(0, Number(count) || 0)
+  const badge = document.getElementById("social-request-badge")
+  const tabBadge = document.getElementById("requests-tab-count")
+  ;[badge, tabBadge].forEach(el => {
+    if (!el) return
+    el.textContent = value > 99 ? "99+" : String(value)
+    el.hidden = value === 0
+  })
+}
+
+async function refreshSocialRequestBadge() {
+  if (!currentUser) return
+  try {
+    const data = await socialFetch("/requests")
+    socialState.requests = data
+    updateSocialRequestBadge(data.incoming?.length || 0)
+    renderSocialRequests()
+  } catch { /* badge refresh stays silent */ }
+}
+
+function initSocialUI() {
+  const input = document.getElementById("people-search-input")
+  input?.addEventListener("input", () => {
+    window.clearTimeout(socialState.searchTimer)
+    const query = normalizeHandleInput(input.value)
+    if (input.value !== query) input.value = query
+    if (query.length < 2) {
+      socialState.searchSerial += 1
+      socialState.searchResults = []
+      renderPeopleResults()
+      setPeopleSearchStatus("Start typing at least two characters.")
+      return
+    }
+    socialState.searchTimer = window.setTimeout(() => performPeopleSearch(), 300)
+  })
+  input?.addEventListener("keydown", event => {
+    if (event.key === "Enter") performPeopleSearch()
+  })
+  document.getElementById("people-search-btn")?.addEventListener("click", performPeopleSearch)
+
+  document.querySelectorAll("[data-shared-filter]").forEach(button => {
+    button.addEventListener("click", () => {
+      socialState.sharedFilter = button.dataset.sharedFilter || "all"
+      document.querySelectorAll("[data-shared-filter]").forEach(item => item.classList.toggle("active", item === button))
+      renderSharedVault()
+    })
+  })
+  document.getElementById("friend-vault-search")?.addEventListener("input", renderSharedVault)
+
+  const sharingOverlay = document.getElementById("sharing-modal")
+  sharingOverlay?.addEventListener("click", event => {
+    if (event.target === sharingOverlay) closeSharingModal()
+  })
+}
+
+async function loadSocialDashboard(force = false) {
+  if (!currentUser || socialState.loading) return
+  if (socialState.loaded && !force) {
+    syncSocialProfileUI()
+    return
+  }
+  socialState.loading = true
+  syncSocialProfileUI()
+  try {
+    await Promise.all([loadSocialFriends(force), loadSocialRequests(force), loadBlockedUsers(force)])
+    socialState.loaded = true
+  } finally {
+    socialState.loading = false
+  }
+}
+
+function activateSocialTab(tab) {
+  socialState.activeTab = tab
+  closeFriendVault({ silent: true })
+  document.getElementById("social-main-panels")?.removeAttribute("hidden")
+  document.querySelectorAll("[data-social-tab]").forEach(button => {
+    button.classList.toggle("active", button.dataset.socialTab === tab)
+  })
+  document.querySelectorAll("[data-social-panel]").forEach(panel => {
+    const active = panel.dataset.socialPanel === tab
+    panel.hidden = !active
+    panel.classList.toggle("active", active)
+  })
+  if (tab === "requests") void loadSocialRequests()
+  if (tab === "friends") void loadSocialFriends()
+  if (tab === "settings") {
+    syncSocialProfileUI()
+    void loadBlockedUsers()
+  }
+}
+window.activateSocialTab = activateSocialTab
+
+function setPeopleSearchStatus(message) {
+  const status = document.getElementById("people-search-status")
+  if (status) status.textContent = message
+}
+
+async function performPeopleSearch() {
+  if (!currentUser) return
+  const query = normalizeHandleInput(document.getElementById("people-search-input")?.value)
+  if (query.length < 2) {
+    setPeopleSearchStatus("Enter at least two characters.")
+    return
+  }
+  const serial = ++socialState.searchSerial
+  setPeopleSearchStatus(`Searching for @${query}…`)
+  const results = document.getElementById("people-results")
+  if (results) results.innerHTML = `<div class="social-loading"><i class="fas fa-spinner fa-spin"></i> Searching people…</div>`
+  try {
+    const data = await socialFetch(`/search?q=${encodeURIComponent(query)}`)
+    if (serial !== socialState.searchSerial) return
+    socialState.searchResults = Array.isArray(data) ? data : []
+    setPeopleSearchStatus(socialState.searchResults.length
+      ? `${socialState.searchResults.length} account${socialState.searchResults.length === 1 ? "" : "s"} found`
+      : "No discoverable account matches this username.")
+    renderPeopleResults()
+  } catch (error) {
+    if (serial !== socialState.searchSerial) return
+    socialState.searchResults = []
+    setPeopleSearchStatus(error.message)
+    renderPeopleResults()
+  }
+}
+window.performPeopleSearch = performPeopleSearch
+
+function personRowTemplate(user, actions, subtitle = "Discoverable account") {
+  return `
+    <div class="person-row">
+      <div class="person-avatar">${escapeHtml(user.username?.charAt(0).toUpperCase() || "U")}</div>
+      <div class="person-copy"><strong>@${escapeHtml(user.username)}</strong><small>${escapeHtml(subtitle)}</small></div>
+      <div class="person-actions">${actions}</div>
+    </div>`
+}
+
+function renderPeopleResults() {
+  const container = document.getElementById("people-results")
+  if (!container) return
+  if (!socialState.searchResults.length) {
+    container.innerHTML = ""
+    return
+  }
+  container.innerHTML = socialState.searchResults.map(user => {
+    let actions = ""
+    if (user.relationship === "friends") {
+      actions = `<button class="social-action-btn success" onclick="openFriendVault('${escapeHtml(user.username)}')"><i class="fas fa-vault"></i> View Shared Vault</button>`
+    } else if (user.relationship === "outgoing") {
+      actions = `<button class="social-action-btn" onclick="cancelFriendRequest('${escapeHtml(user.request_id)}')"><i class="fas fa-clock"></i> Cancel Request</button>`
+    } else if (user.relationship === "incoming") {
+      actions = `<button class="social-action-btn primary" onclick="acceptFriendRequest('${escapeHtml(user.request_id)}')"><i class="fas fa-check"></i> Accept</button>`
+    } else if (user.allow_friend_requests === false) {
+      actions = `<button class="social-action-btn" disabled><i class="fas fa-user-lock"></i> Requests Off</button>`
+    } else {
+      actions = `<button class="social-action-btn primary" onclick="sendFriendRequest('${escapeHtml(user.username)}')"><i class="fas fa-user-plus"></i> Add Friend</button>`
+    }
+    return personRowTemplate(user, actions, user.relationship === "friends" ? "Connected friend" : "Unique public username")
+  }).join("")
+}
+
+async function sendFriendRequest(username) {
+  try {
+    await socialFetch("/requests", { method: "POST", body: JSON.stringify({ username }) })
+    showToast(`Friend request sent to @${username}`, "success")
+    await Promise.all([performPeopleSearch(), loadSocialRequests(true)])
+  } catch (error) { showToast(error.message, "error") }
+}
+window.sendFriendRequest = sendFriendRequest
+
+async function acceptFriendRequest(id) {
+  try {
+    await socialFetch(`/requests/${encodeURIComponent(id)}/accept`, { method: "POST" })
+    showToast("Friend request accepted", "success")
+    await Promise.all([loadSocialRequests(true), loadSocialFriends(true)])
+    if (document.getElementById("people-search-input")?.value) void performPeopleSearch()
+  } catch (error) { showToast(error.message, "error") }
+}
+window.acceptFriendRequest = acceptFriendRequest
+
+async function declineFriendRequest(id) {
+  try {
+    await socialFetch(`/requests/${encodeURIComponent(id)}/decline`, { method: "POST" })
+    showToast("Friend request declined", "info")
+    await loadSocialRequests(true)
+  } catch (error) { showToast(error.message, "error") }
+}
+window.declineFriendRequest = declineFriendRequest
+
+async function cancelFriendRequest(id) {
+  try {
+    await socialFetch(`/requests/${encodeURIComponent(id)}`, { method: "DELETE" })
+    showToast("Friend request cancelled", "info")
+    await loadSocialRequests(true)
+    if (document.getElementById("people-search-input")?.value) void performPeopleSearch()
+  } catch (error) { showToast(error.message, "error") }
+}
+window.cancelFriendRequest = cancelFriendRequest
+
+async function loadSocialRequests(force = false) {
+  if (!currentUser) return
+  const incomingContainer = document.getElementById("incoming-requests")
+  if (!socialState.requests.incoming.length && incomingContainer && !force) {
+    incomingContainer.innerHTML = `<div class="social-loading"><i class="fas fa-spinner fa-spin"></i> Loading requests…</div>`
+  }
+  try {
+    socialState.requests = await socialFetch("/requests")
+    updateSocialRequestBadge(socialState.requests.incoming?.length || 0)
+    renderSocialRequests()
+  } catch (error) {
+    if (incomingContainer) incomingContainer.innerHTML = `<div class="social-empty"><p>${escapeHtml(error.message)}</p></div>`
+  }
+}
+window.loadSocialRequests = loadSocialRequests
+
+function renderSocialRequests() {
+  const incoming = socialState.requests.incoming || []
+  const outgoing = socialState.requests.outgoing || []
+  const inEl = document.getElementById("incoming-requests")
+  const outEl = document.getElementById("outgoing-requests")
+  const inCount = document.getElementById("incoming-count")
+  const outCount = document.getElementById("outgoing-count")
+  if (inCount) inCount.textContent = incoming.length
+  if (outCount) outCount.textContent = outgoing.length
+  if (inEl) inEl.innerHTML = incoming.length ? incoming.map(request => personRowTemplate(
+    request.user,
+    `<button class="social-action-btn primary" onclick="acceptFriendRequest('${request.id}')"><i class="fas fa-check"></i> Accept</button><button class="social-action-btn danger" onclick="declineFriendRequest('${request.id}')"><i class="fas fa-times"></i> Decline</button>`,
+    "Wants to connect with you"
+  )).join("") : `<div class="social-empty"><i class="fas fa-inbox"></i><h3>No incoming requests</h3><p>New requests will appear here.</p></div>`
+  if (outEl) outEl.innerHTML = outgoing.length ? outgoing.map(request => personRowTemplate(
+    request.user,
+    `<button class="social-action-btn" onclick="cancelFriendRequest('${request.id}')"><i class="fas fa-times"></i> Cancel</button>`,
+    "Waiting for a response"
+  )).join("") : `<div class="social-empty"><i class="fas fa-paper-plane"></i><h3>No sent requests</h3><p>Search for someone to connect.</p></div>`
+}
+
+async function loadSocialFriends(force = false) {
+  if (!currentUser) return
+  const container = document.getElementById("friends-grid")
+  if (!socialState.friends.length && container && !force) {
+    container.innerHTML = `<div class="social-loading"><i class="fas fa-spinner fa-spin"></i> Loading friends…</div>`
+  }
+  try {
+    socialState.friends = await socialFetch("/friends")
+    renderSocialFriends()
+  } catch (error) {
+    if (container) container.innerHTML = `<div class="social-empty"><p>${escapeHtml(error.message)}</p></div>`
+  }
+}
+window.loadSocialFriends = loadSocialFriends
+
+function sharingSummary(permission = {}) {
+  if (permission.full_collection) return ["Full collection", permission.ratings ? "Ratings" : "Ratings private"]
+  const labels = []
+  if (permission.watching) labels.push("Watching")
+  if (permission.watched) labels.push("Watched")
+  if (permission.favorites) labels.push("Favorites")
+  if (permission.ratings) labels.push("Ratings")
+  return labels.length ? labels : ["Nothing shared"]
+}
+
+function renderSocialFriends() {
+  const container = document.getElementById("friends-grid")
+  if (!container) return
+  if (!socialState.friends.length) {
+    container.innerHTML = `<div class="social-empty"><i class="fas fa-user-group"></i><h3>Your circle is empty</h3><p>Find someone by @username or share an invite code.</p></div>`
+    return
+  }
+  container.innerHTML = socialState.friends.map(friend => `
+    <article class="friend-card">
+      <div class="friend-card-head">
+        <div class="person-avatar">${escapeHtml(friend.username.charAt(0).toUpperCase())}</div>
+        <div><strong>@${escapeHtml(friend.username)}</strong><small>Connected friend</small></div>
+      </div>
+      <div class="friend-share-summary">${sharingSummary(friend.sharing).map(label => `<span>${escapeHtml(label)}</span>`).join("")}</div>
+      <div class="friend-card-actions">
+        <button class="social-action-btn primary" onclick="openFriendVault('${escapeHtml(friend.username)}')"><i class="fas fa-vault"></i> Shared Vault</button>
+        <button class="social-action-btn" onclick="openSharingModal('${escapeHtml(friend.username)}')" title="Sharing permissions"><i class="fas fa-shield-halved"></i></button>
+        <button class="social-action-btn danger" onclick="removeFriend('${escapeHtml(friend.username)}')" title="Remove friend"><i class="fas fa-user-minus"></i></button>
+        <button class="social-action-btn danger" onclick="blockUser('${escapeHtml(friend.username)}')" title="Block user"><i class="fas fa-ban"></i></button>
+      </div>
+    </article>`).join("")
+}
+
+async function removeFriend(username) {
+  if (!window.confirm(`Remove @${username} from your friends?`)) return
+  try {
+    await socialFetch(`/friends/${encodeURIComponent(username)}`, { method: "DELETE" })
+    showToast(`@${username} was removed`, "info")
+    await loadSocialFriends(true)
+  } catch (error) { showToast(error.message, "error") }
+}
+window.removeFriend = removeFriend
+
+async function blockUser(username) {
+  if (!window.confirm(`Block @${username}? This removes any friendship and requests.`)) return
+  try {
+    await socialFetch(`/block/${encodeURIComponent(username)}`, { method: "POST" })
+    showToast(`@${username} was blocked`, "info")
+    await Promise.all([loadSocialFriends(true), loadSocialRequests(true), loadBlockedUsers(true)])
+  } catch (error) { showToast(error.message, "error") }
+}
+window.blockUser = blockUser
+
+async function unblockUser(username) {
+  try {
+    await socialFetch(`/block/${encodeURIComponent(username)}`, { method: "DELETE" })
+    showToast(`@${username} was unblocked`, "success")
+    await loadBlockedUsers(true)
+  } catch (error) { showToast(error.message, "error") }
+}
+window.unblockUser = unblockUser
+
+async function loadBlockedUsers() {
+  if (!currentUser) return
+  const container = document.getElementById("blocked-users")
+  try {
+    socialState.blocked = await socialFetch("/blocked")
+    if (container) container.innerHTML = socialState.blocked.length
+      ? socialState.blocked.map(user => personRowTemplate(user, `<button class="social-action-btn" onclick="unblockUser('${escapeHtml(user.username)}')">Unblock</button>`, "Blocked account")).join("")
+      : `<div class="social-empty"><i class="fas fa-shield"></i><h3>No blocked users</h3><p>Accounts you block will appear here.</p></div>`
+  } catch (error) {
+    if (container) container.innerHTML = `<div class="social-empty"><p>${escapeHtml(error.message)}</p></div>`
+  }
+}
+
+async function openSharingModal(username) {
+  try {
+    const data = await socialFetch(`/friends/${encodeURIComponent(username)}/permissions`)
+    socialState.permissionFriend = data.user
+    document.getElementById("sharing-modal-title").textContent = `Share with @${data.user.username}`
+    document.getElementById("perm-watching").checked = Boolean(data.permissions.watching)
+    document.getElementById("perm-watched").checked = Boolean(data.permissions.watched)
+    document.getElementById("perm-favorites").checked = Boolean(data.permissions.favorites)
+    document.getElementById("perm-ratings").checked = Boolean(data.permissions.ratings)
+    document.getElementById("perm-full").checked = Boolean(data.permissions.full_collection)
+    const modal = document.getElementById("sharing-modal")
+    if (modal) modal.hidden = false
+    document.body.style.overflow = "hidden"
+  } catch (error) { showToast(error.message, "error") }
+}
+window.openSharingModal = openSharingModal
+
+function closeSharingModal() {
+  const modal = document.getElementById("sharing-modal")
+  if (modal) modal.hidden = true
+  if (document.getElementById("detail-modal")?.style.display !== "flex") document.body.style.overflow = ""
+  socialState.permissionFriend = null
+}
+window.closeSharingModal = closeSharingModal
+
+async function saveSharingPermissions() {
+  const username = socialState.permissionFriend?.username
+  if (!username) return
+  const button = document.getElementById("save-sharing-btn")
+  const permissions = {
+    watching: document.getElementById("perm-watching").checked,
+    watched: document.getElementById("perm-watched").checked,
+    favorites: document.getElementById("perm-favorites").checked,
+    ratings: document.getElementById("perm-ratings").checked,
+    full_collection: document.getElementById("perm-full").checked,
+  }
+  if (button) { button.disabled = true; button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving…` }
+  try {
+    await socialFetch(`/friends/${encodeURIComponent(username)}/permissions`, {
+      method: "PUT",
+      body: JSON.stringify(permissions),
+    })
+    showToast(`Sharing updated for @${username}`, "success")
+    closeSharingModal()
+    await loadSocialFriends(true)
+  } catch (error) { showToast(error.message, "error") }
+  if (button) { button.disabled = false; button.innerHTML = `<i class="fas fa-check"></i> Save Sharing` }
+}
+window.saveSharingPermissions = saveSharingPermissions
+
+async function openFriendVault(username) {
+  const main = document.getElementById("social-main-panels")
+  const panel = document.getElementById("friend-vault-panel")
+  const grid = document.getElementById("friend-vault-grid")
+  if (main) main.hidden = true
+  if (panel) panel.hidden = false
+  if (grid) grid.innerHTML = `<div class="social-loading"><i class="fas fa-spinner fa-spin"></i> Opening @${escapeHtml(username)}'s shared vault…</div>`
+  socialState.sharedOwner = { username }
+  socialState.sharedItems = []
+  socialState.sharedFilter = "all"
+  document.querySelectorAll("[data-shared-filter]").forEach(button => button.classList.toggle("active", button.dataset.sharedFilter === "all"))
+  const search = document.getElementById("friend-vault-search")
+  if (search) search.value = ""
+  try {
+    const data = await socialFetch(`/friends/${encodeURIComponent(username)}/vault`)
+    socialState.sharedOwner = data.owner
+    socialState.sharedPermissions = data.permissions
+    socialState.sharedItems = (data.items || []).map(item => ({
+      ...normaliseMediaItem(item),
+      display_year: item.media_type === "series" && item.end_year
+        ? `${item.release_year}–${item.end_year}`
+        : String(item.release_year || "—"),
+      __shared_read_only: true,
+    }))
+    document.getElementById("friend-vault-name").textContent = `@${data.owner.username}`
+    document.getElementById("friend-vault-avatar").textContent = data.owner.username.charAt(0).toUpperCase()
+    document.getElementById("friend-stat-total").textContent = data.stats?.total || 0
+    document.getElementById("friend-stat-movies").textContent = data.stats?.movies || 0
+    document.getElementById("friend-stat-series").textContent = data.stats?.series || 0
+    document.getElementById("friend-vault-access").textContent = data.permissions.full_collection
+      ? `@${data.owner.username} shares the full collection with you. Read-only access.`
+      : `Shared categories: ${sharingSummary(data.permissions).join(" • ")}. Read-only access.`
+    renderSharedVault()
+  } catch (error) {
+    if (grid) grid.innerHTML = `<div class="social-empty"><i class="fas fa-triangle-exclamation"></i><h3>Could not open this vault</h3><p>${escapeHtml(error.message)}</p></div>`
+  }
+}
+window.openFriendVault = openFriendVault
+
+function closeFriendVault({ silent = false } = {}) {
+  const main = document.getElementById("social-main-panels")
+  const panel = document.getElementById("friend-vault-panel")
+  if (main) main.hidden = false
+  if (panel) panel.hidden = true
+  if (!silent) activateSocialTab("friends")
+}
+window.closeFriendVault = closeFriendVault
+
+function getFilteredSharedItems() {
+  const query = normalizeMediaSearchTitle(document.getElementById("friend-vault-search")?.value || "").toLowerCase()
+  return socialState.sharedItems.filter(item => {
+    const filter = socialState.sharedFilter
+    const categoryMatch = filter === "all"
+      || (filter === "favorites" ? item.favorite : item.watch_status === filter)
+    const queryMatch = !query || normalizeMediaSearchTitle(item.title).toLowerCase().includes(query)
+    return categoryMatch && queryMatch
+  })
+}
+
+function buildSharedMediaCard(item) {
+  const card = document.createElement("article")
+  card.className = "shared-media-card"
+  const hasPoster = item.poster_url && item.poster_url.startsWith("http")
+  const rating = item.rating === null ? "Private" : `★ ${Number(item.rating || 0).toFixed(1)}`
+  card.innerHTML = `
+    <div class="shared-media-poster">
+      ${hasPoster ? `<img src="${escapeHtml(item.poster_url)}" alt="${escapeHtml(item.title)}" loading="lazy">` : `<div class="shared-media-placeholder"><i class="fas fa-${item.media_type === "movie" ? "film" : "tv"}"></i></div>`}
+      <div class="shared-media-badges"><span>${escapeHtml(item.display_year)}</span><span>${escapeHtml(rating)}</span></div>
+      ${item.watch_status ? `<div class="shared-media-status"><i class="fas fa-${item.watch_status === "watching" ? "play" : "circle-check"}"></i> ${escapeHtml(item.watch_status.replace(/_/g, " "))}${item.favorite ? " • ♥" : ""}</div>` : item.favorite ? `<div class="shared-media-status"><i class="fas fa-heart"></i> Favorite</div>` : ""}
+    </div>
+    <div class="shared-media-body"><strong title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</strong><small>${escapeHtml(item.genre || (item.media_type === "movie" ? "Movie" : "Series"))}</small></div>`
+  card.addEventListener("click", () => showDetailModal(item))
+  return card
+}
+
+function renderSharedVault() {
+  const grid = document.getElementById("friend-vault-grid")
+  const empty = document.getElementById("friend-vault-empty")
+  if (!grid || !empty) return
+  const items = getFilteredSharedItems()
+  grid.innerHTML = ""
+  empty.hidden = items.length > 0
+  if (!items.length) return
+  const fragment = document.createDocumentFragment()
+  items.forEach(item => fragment.appendChild(buildSharedMediaCard(item)))
+  grid.appendChild(fragment)
+}
+
+async function createInviteCode() {
+  const button = document.getElementById("create-invite-btn")
+  if (button) { button.disabled = true; button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Generating…` }
+  try {
+    const data = await socialFetch("/invites", { method: "POST", body: "{}" })
+    const box = document.getElementById("generated-invite")
+    document.getElementById("generated-invite-code").textContent = data.code
+    document.getElementById("generated-invite-expiry").textContent = `Expires ${new Date(data.expires_at).toLocaleString()}`
+    if (box) box.hidden = false
+    showToast("One-time invite code created", "success")
+  } catch (error) { showToast(error.message, "error") }
+  if (button) { button.disabled = false; button.innerHTML = `<i class="fas fa-ticket"></i> Generate Code` }
+}
+window.createInviteCode = createInviteCode
+
+async function copyInviteCode() {
+  const code = document.getElementById("generated-invite-code")?.textContent
+  if (!code) return
+  try {
+    await navigator.clipboard.writeText(code)
+    showToast("Invite code copied", "success")
+  } catch { showToast(`Copy this code: ${code}`, "info") }
+}
+window.copyInviteCode = copyInviteCode
+
+async function joinInviteCode() {
+  const input = document.getElementById("join-invite-code")
+  const code = input?.value.trim().toUpperCase()
+  if (!code) { showToast("Enter an invite code", "error"); return }
+  try {
+    const data = await socialFetch("/invites/join", { method: "POST", body: JSON.stringify({ code }) })
+    if (input) input.value = ""
+    showToast(`Friend request sent to @${data.user.username}`, "success")
+    await loadSocialRequests(true)
+  } catch (error) { showToast(error.message, "error") }
+}
+window.joinInviteCode = joinInviteCode
+
+async function saveSocialSettings() {
+  const discoverable = Boolean(document.getElementById("setting-discoverable")?.checked)
+  const allow_friend_requests = Boolean(document.getElementById("setting-friend-requests")?.checked)
+  try {
+    const response = await fetch(`${AUTH_BASE_URL}/settings`, {
+      method: "PATCH",
+      headers: authHeaders(),
+      body: JSON.stringify({ discoverable, allow_friend_requests }),
+    })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error || "Could not save settings")
+    currentUser = { ...currentUser, ...(data.user || {}) }
+    syncSocialProfileUI()
+    showToast("Privacy settings saved", "success")
+  } catch (error) { showToast(error.message, "error") }
+}
+window.saveSocialSettings = saveSocialSettings
