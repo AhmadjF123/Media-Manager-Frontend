@@ -3605,3 +3605,86 @@ body.light-theme .sort-option.active { background: linear-gradient(105deg, rgba(
   .card-grid.is-reordering .media-card { animation: none; }
   .sort-popover { transition: none; }
 }
+
+/* Vault-only actor suggestions */
+.actor-suggestion-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.actor-suggestion-title-row strong {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.actor-suggestion-title-row em {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(212,168,67,.24);
+  background: rgba(212,168,67,.1);
+  color: var(--gold-light);
+  font-size: .61rem;
+  font-style: normal;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.actor-vault-breakdown {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 17px;
+  margin-top: 1px;
+}
+.actor-vault-breakdown b {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--gold-light);
+  font-size: .59rem;
+  font-weight: 600;
+  opacity: .86;
+}
+.actor-vault-breakdown i { font-size: .56rem; }
+.actor-suggestion-card {
+  grid-template-columns: 48px minmax(0, 1fr) 14px;
+  min-height: 72px;
+}
+.actor-suggestion-photo,
+.actor-suggestion-ph {
+  width: 48px;
+  height: 48px;
+}
+
+.actor-copy-btn {
+  min-height: 34px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid rgba(212,168,67,.28);
+  border-radius: 999px;
+  color: var(--gold-light);
+  background: linear-gradient(135deg, rgba(212,168,67,.13), rgba(212,168,67,.055));
+  font-size: .65rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease, opacity .18s ease;
+}
+.actor-copy-btn:not(:disabled):hover {
+  transform: translateY(-2px);
+  border-color: rgba(212,168,67,.5);
+  box-shadow: 0 8px 22px rgba(0,0,0,.2), 0 0 18px rgba(212,168,67,.1);
+}
+.actor-copy-btn:disabled { opacity: .38; cursor: not-allowed; }
+.actor-copy-btn i { font-size: .67rem; }
+
+@media (max-width: 760px) {
+  .actor-match-banner { flex-wrap: wrap; }
+  .actor-match-copy { flex-basis: calc(100% - 78px); }
+  .actor-match-count { margin-left: 72px; }
+  .actor-copy-btn span { display: none; }
+  .actor-copy-btn { width: 34px; padding: 0; }
+}

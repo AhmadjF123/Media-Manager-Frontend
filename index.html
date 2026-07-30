@@ -169,10 +169,10 @@
               </div>
               <div class="actor-search-copy">
                 <span class="actor-kicker">Cast Explorer</span>
-                <strong>Search your collection by performer</strong>
-                <small>Choose an actor and the vault will reveal every matching movie and series.</small>
+                <strong>Find performers already inside your vault</strong>
+                <small>Type a name and only actors with matching titles in your collection will appear.</small>
               </div>
-              <span class="actor-tmdb-pill"><i class="fas fa-wand-magic-sparkles"></i> Smart cast match</span>
+              <span class="actor-tmdb-pill"><i class="fas fa-bolt"></i> Vault-only results</span>
             </div>
 
             <div id="actor-suggestions" class="actor-suggestions" role="listbox" aria-label="Actor suggestions" hidden></div>
@@ -190,6 +190,10 @@
                 <strong id="actor-match-total">—</strong>
                 <span>titles in your vault</span>
               </div>
+              <button type="button" id="actor-copy-btn" class="actor-copy-btn" title="Copy all matching titles" aria-label="Copy all matching titles" disabled>
+                <i class="fas fa-copy"></i>
+                <span>Copy list</span>
+              </button>
               <button type="button" id="actor-clear-btn" class="actor-clear-btn" title="Clear actor search" aria-label="Clear actor search">
                 <i class="fas fa-xmark"></i>
               </button>

@@ -42,6 +42,7 @@ const actorMatchName    = document.getElementById("actor-match-name")
 const actorMatchMeta    = document.getElementById("actor-match-meta")
 const actorMatchTotal   = document.getElementById("actor-match-total")
 const actorClearBtn     = document.getElementById("actor-clear-btn")
+const actorCopyBtn      = document.getElementById("actor-copy-btn")
 const resultsTable      = document.getElementById("results-table")
 const resultsBody       = document.getElementById("results-body")
 const statusLabel       = document.getElementById("status-label")
@@ -113,8 +114,9 @@ const actorSearchState = {
   debounceTimer: null,
   busy: false,
 }
-const _actorPeopleCache  = new Map()
-const _actorCreditsCache = new Map()
+const _actorPeopleCache          = new Map()
+const _actorCreditsCache         = new Map()
+const _actorVaultCandidatesCache = new Map()
 
 // ── Sorting state ──
 const SORT_STORAGE_KEY = "cinema_sort_preference"
@@ -126,7 +128,10 @@ let sortState = loadSortState()
 const _cache = { data: null, ts: 0, TTL: 60_000 }   // 60s cache
 function _cacheGet()          { return (Date.now() - _cache.ts < _cache.TTL) ? _cache.data : null }
 function _cacheSet(data)      { _cache.data = data; _cache.ts = Date.now() }
-function _cacheInvalidate()   { _cache.ts = 0 }
+function _cacheInvalidate() {
+  _cache.ts = 0
+  _actorVaultCandidatesCache.clear()
+}
 
 // ════════════════════════════════════════════════
 //  API FUNCTIONS
@@ -176,7 +181,7 @@ function hideSkeletons() {
 }
 
 // ── Fetch ALL media in one request (with cache) ──
-async function fetchAllMedia() {
+async function fetchAllMedia({ showSkeleton = true } = {}) {
   // Guest users have no collection
   if (!currentUser) return []
 
@@ -184,8 +189,8 @@ async function fetchAllMedia() {
   if (cached) return cached
 
   try {
-    // Show skeletons in the grid instead of fullscreen spinner
-    showSkeletons(20)
+    // Normal collection loads use skeletons. Background cast matching stays invisible.
+    if (showSkeleton) showSkeletons(20)
     const params = new URLSearchParams({
       type: "all",
       sort_by: sortState.field,
@@ -197,7 +202,7 @@ async function fetchAllMedia() {
     if (response.status === 401) { handleUnauthorized(); return [] }
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
     const data = await response.json()
-    hideSkeletons()
+    if (showSkeleton) hideSkeletons()
     if (!Array.isArray(data)) return []
     const normalised = data.map(item => ({
       ...item,
@@ -209,7 +214,7 @@ async function fetchAllMedia() {
     _cacheSet(normalised)
     return normalised
   } catch(error) {
-    hideSkeletons()
+    if (showSkeleton) hideSkeletons()
     showToast(`Error fetching media: ${error.message}`, "error")
     return []
   }
@@ -320,6 +325,7 @@ async function init() {
   searchBySelect.addEventListener("change", handleSearchModeChange)
   filterTypeSelect.addEventListener("change", searchMedia)
   actorClearBtn?.addEventListener("click", clearActorSearch)
+  actorCopyBtn?.addEventListener("click", copyActorRecommendationList)
   document.addEventListener("click", event => {
     if (actorSearchPanel && !actorSearchPanel.contains(event.target) && event.target !== searchInput) {
       hideActorSuggestions()
@@ -801,10 +807,72 @@ async function searchPeopleByName(query) {
   if (!response.ok) throw new Error("Could not search actors right now")
   const data = await response.json()
   const people = (data.results || [])
-    .filter(person => person?.id && person?.name)
-    .slice(0, 7)
+    .filter(person => person?.id && person?.name && person.known_for_department === "Acting")
+    .slice(0, 10)
   _actorPeopleCache.set(cacheKey, people)
   return people
+}
+
+function getActorVaultCacheKey(query, filterType, collection) {
+  // _cache.ts changes whenever the collection is refetched after an add/edit/delete.
+  return `${normalizeMediaSearchTitle(query).toLowerCase()}|${filterType}|${_cache.ts}|${collection.length}`
+}
+
+async function findActorsInsideVault(query, filterType = "all") {
+  const cleaned = normalizeMediaSearchTitle(query)
+  if (!cleaned) return []
+
+  // Fetch the user's collection silently, without replacing the visible cards with skeletons.
+  const collection = await fetchAllMedia({ showSkeleton: false })
+  if (!collection.length) return []
+
+  const cacheKey = getActorVaultCacheKey(cleaned, filterType, collection)
+  if (_actorVaultCandidatesCache.has(cacheKey)) {
+    return _actorVaultCandidatesCache.get(cacheKey)
+  }
+
+  const people = await searchPeopleByName(cleaned)
+  if (!people.length) return []
+
+  // Reverse matching is much faster than indexing every title in a large vault:
+  // one filmography request per likely name, then intersect it with the local collection.
+  const checked = await Promise.allSettled(
+    people.map(async person => {
+      const credits = await fetchActorCredits(person.id)
+      const allMatches = matchCollectionToActorCredits(collection, credits, "all", person)
+      const visibleMatches = filterType === "all"
+        ? allMatches
+        : allMatches.filter(item => item.media_type === filterType)
+      if (!visibleMatches.length) return null
+
+      return {
+        ...person,
+        // Keep every vault match so switching Movies/Series after selection is instant.
+        _vaultMatches: allMatches,
+        _vaultSuggestionMatches: visibleMatches,
+        _vaultCount: visibleMatches.length,
+        _vaultMovieCount: visibleMatches.filter(item => item.media_type === "movie").length,
+        _vaultSeriesCount: visibleMatches.filter(item => item.media_type === "series").length,
+        _vaultCreditsCount: credits.length,
+      }
+    })
+  )
+
+  const exactName = cleaned.toLowerCase()
+  const candidates = checked
+    .filter(result => result.status === "fulfilled" && result.value)
+    .map(result => result.value)
+    .sort((a, b) => {
+      const aExact = a.name.toLowerCase() === exactName ? 1 : 0
+      const bExact = b.name.toLowerCase() === exactName ? 1 : 0
+      return (bExact - aExact)
+        || (b._vaultCount - a._vaultCount)
+        || ((b.popularity || 0) - (a.popularity || 0))
+    })
+    .slice(0, 7)
+
+  _actorVaultCandidatesCache.set(cacheKey, candidates)
+  return candidates
 }
 
 async function loadActorSuggestions(query) {
@@ -812,7 +880,7 @@ async function loadActorSuggestions(query) {
   showActorSuggestionsLoading()
 
   try {
-    const people = await searchPeopleByName(query)
+    const people = await findActorsInsideVault(query, filterTypeSelect.value)
     if (serial !== actorSearchState.requestSerial || searchBySelect.value !== "actor") return
     actorSearchState.suggestions = people
     renderActorSuggestions(people, query)
@@ -822,9 +890,9 @@ async function loadActorSuggestions(query) {
   }
 }
 
-function getActorKnownFor(person) {
-  return (person.known_for || [])
-    .map(work => work.title || work.name)
+function getActorVaultPreview(person) {
+  return (person._vaultSuggestionMatches || person._vaultMatches || [])
+    .map(item => item.title)
     .filter(Boolean)
     .slice(0, 3)
     .join(" · ")
@@ -838,19 +906,22 @@ function renderActorSuggestions(people, query) {
     actorSuggestions.innerHTML = `
       <div class="actor-suggestion-empty">
         <i class="fas fa-user-slash"></i>
-        <div><strong>No actor found</strong><span>Try a different spelling for “${escapeHtml(query)}”.</span></div>
+        <div>
+          <strong>No matching performer in your collection</strong>
+          <span>Try the full name, or switch the media filter to “All”.</span>
+        </div>
       </div>`
     return
   }
 
   actorSuggestions.innerHTML = `
     <div class="actor-suggestions-head">
-      <span><i class="fas fa-sparkles"></i> Choose the right performer</span>
-      <small>${people.length} match${people.length === 1 ? "" : "es"}</small>
+      <span><i class="fas fa-vault"></i> Performers found in your collection</span>
+      <small>${people.length} vault match${people.length === 1 ? "" : "es"}</small>
     </div>
     <div class="actor-suggestions-grid">
       ${people.map((person, index) => {
-        const knownFor = getActorKnownFor(person) || person.known_for_department || "Film & television"
+        const preview = getActorVaultPreview(person) || "Titles available in your vault"
         const photo = person.profile_path
           ? `<img src="${TMDB_IMAGE_URL}${person.profile_path}" alt="" loading="lazy">`
           : `<span class="actor-suggestion-ph"><i class="fas fa-user"></i></span>`
@@ -858,8 +929,15 @@ function renderActorSuggestions(people, query) {
           <button type="button" class="actor-suggestion-card" data-actor-index="${index}" role="option">
             <span class="actor-suggestion-photo">${photo}</span>
             <span class="actor-suggestion-copy">
-              <strong>${escapeHtml(person.name)}</strong>
-              <small>${escapeHtml(knownFor)}</small>
+              <span class="actor-suggestion-title-row">
+                <strong>${escapeHtml(person.name)}</strong>
+                <em>${person._vaultCount} title${person._vaultCount === 1 ? "" : "s"}</em>
+              </span>
+              <small>${escapeHtml(preview)}</small>
+              <span class="actor-vault-breakdown">
+                ${person._vaultMovieCount ? `<b><i class="fas fa-film"></i> ${person._vaultMovieCount}</b>` : ""}
+                ${person._vaultSeriesCount ? `<b><i class="fas fa-tv"></i> ${person._vaultSeriesCount}</b>` : ""}
+              </span>
             </span>
             <i class="fas fa-chevron-right"></i>
           </button>`
@@ -880,7 +958,7 @@ function showActorSuggestionsLoading() {
   actorSuggestions.innerHTML = `
     <div class="actor-suggestion-loading">
       <span class="actor-loading-orbit"><i class="fas fa-user"></i></span>
-      <div><strong>Searching the cast index…</strong><span>Finding the best performer matches</span></div>
+      <div><strong>Checking performers in your vault…</strong><span>Only names with matching titles will appear</span></div>
     </div>`
 }
 
@@ -939,7 +1017,8 @@ function getCreditYear(credit) {
 }
 
 function buildActorCreditIndex(credits) {
-  const index = new Map()
+  const titleIndex = new Map()
+  const posterIndex = new Map()
 
   credits.forEach(credit => {
     const type = credit.media_type === "tv" ? "series" : "movie"
@@ -950,12 +1029,34 @@ function buildActorCreditIndex(credits) {
       const normalized = normalizeCreditTitle(name)
       if (!normalized) return
       const key = `${type}|${normalized}`
-      if (!index.has(key)) index.set(key, [])
-      index.get(key).push(credit)
+      if (!titleIndex.has(key)) titleIndex.set(key, [])
+      titleIndex.get(key).push(credit)
     })
+
+    if (credit.poster_path) {
+      posterIndex.set(`${type}|${credit.poster_path}`, credit)
+    }
   })
 
-  return index
+  return { titleIndex, posterIndex }
+}
+
+function getStoredPosterPath(posterUrl) {
+  if (!posterUrl) return ""
+  try {
+    const pathname = new URL(posterUrl, window.location.href).pathname
+    const marker = "/t/p/"
+    const markerIndex = pathname.indexOf(marker)
+    if (markerIndex >= 0) {
+      const afterSize = pathname.slice(markerIndex + marker.length)
+      const slashIndex = afterSize.indexOf("/")
+      return slashIndex >= 0 ? afterSize.slice(slashIndex) : ""
+    }
+    return pathname.startsWith("/") ? pathname : `/${pathname}`
+  } catch (_) {
+    const match = String(posterUrl).match(/\/([^/?#]+\.(?:jpg|jpeg|png|webp))(?:[?#]|$)/i)
+    return match ? `/${match[1]}` : ""
+  }
 }
 
 function chooseBestActorCredit(item, candidates) {
@@ -977,13 +1078,19 @@ function chooseBestActorCredit(item, candidates) {
 }
 
 function matchCollectionToActorCredits(collection, credits, filterType, actor) {
-  const creditIndex = buildActorCreditIndex(credits)
+  const { titleIndex, posterIndex } = buildActorCreditIndex(credits)
 
   return collection.flatMap(item => {
     if (filterType !== "all" && item.media_type !== filterType) return []
 
-    const key = `${item.media_type}|${normalizeCreditTitle(item.title)}`
-    const credit = chooseBestActorCredit(item, creditIndex.get(key))
+    // Poster paths are TMDB-stable and avoid missing matches when stored/display titles differ.
+    const posterPath = getStoredPosterPath(item.poster_url)
+    const posterCredit = posterPath
+      ? posterIndex.get(`${item.media_type}|${posterPath}`)
+      : null
+
+    const titleKey = `${item.media_type}|${normalizeCreditTitle(item.title)}`
+    const credit = posterCredit || chooseBestActorCredit(item, titleIndex.get(titleKey))
     if (!credit) return []
 
     return [{
@@ -997,14 +1104,14 @@ function matchCollectionToActorCredits(collection, credits, filterType, actor) {
   })
 }
 
-async function resolveActorForSearch(query) {
+async function resolveActorForSearch(query, filterType = "all") {
   const cleaned = normalizeMediaSearchTitle(query)
   if (!cleaned) return null
 
   const selected = actorSearchState.selected
   if (selected && selected.name.toLowerCase() === cleaned.toLowerCase()) return selected
 
-  const people = await searchPeopleByName(cleaned)
+  const people = await findActorsInsideVault(cleaned, filterType)
   if (!people.length) return null
 
   const exact = people.find(person => person.name.toLowerCase() === cleaned.toLowerCase())
@@ -1032,14 +1139,14 @@ async function searchCollectionByActor(rawQuery, filterType) {
 
   setActorSearchBusy(true)
   try {
-    const actor = await resolveActorForSearch(query)
+    const actor = await resolveActorForSearch(query, filterType)
     if (serial !== actorSearchState.requestSerial || searchBySelect.value !== "actor") return
 
     if (!actor) {
       actorSearchState.selected = null
       hideActorMatchBanner()
       updateResultsTable([])
-      showToast(`No actor found for “${query}”`, "info")
+      showToast(`No performer named “${query}” has titles in your collection`, "info")
       return
     }
 
@@ -1048,16 +1155,23 @@ async function searchCollectionByActor(rawQuery, filterType) {
     renderActorMatchBanner(actor, { loading: true })
 
     const [collection, credits] = await Promise.all([
-      fetchAllMedia(),
+      fetchAllMedia({ showSkeleton: false }),
       fetchActorCredits(actor.id),
     ])
     if (serial !== actorSearchState.requestSerial || searchBySelect.value !== "actor") return
 
-    const results = prepareDisplayResults(
-      matchCollectionToActorCredits(collection, credits, filterType, actor)
-    )
+    const matchedItems = Array.isArray(actor._vaultMatches)
+      ? actor._vaultMatches.filter(item => filterType === "all" || item.media_type === filterType)
+      : matchCollectionToActorCredits(collection, credits, filterType, actor)
 
-    renderActorMatchBanner(actor, { count: results.length, creditsCount: credits.length })
+    const results = prepareDisplayResults(matchedItems)
+
+    renderActorMatchBanner(actor, {
+      count: results.length,
+      creditsCount: credits.length,
+      movieCount: results.filter(item => item.media_type === "movie").length,
+      seriesCount: results.filter(item => item.media_type === "series").length,
+    })
     updateResultsTable(results)
   } catch (error) {
     if (serial !== actorSearchState.requestSerial) return
@@ -1076,6 +1190,7 @@ function renderActorMatchBanner(actor, options = {}) {
 
   actorMatchName.textContent = actor.name
   actorMatchTotal.textContent = options.loading ? "…" : String(options.count ?? 0)
+  if (actorCopyBtn) actorCopyBtn.disabled = Boolean(options.loading || options.error || !(options.count > 0))
 
   if (options.error) {
     actorMatchMeta.textContent = options.error
@@ -1083,7 +1198,13 @@ function renderActorMatchBanner(actor, options = {}) {
     actorMatchMeta.textContent = "Scanning movies and series in your collection…"
   } else {
     const department = actor.known_for_department || "Acting"
-    actorMatchMeta.textContent = `${department} · ${options.creditsCount || 0} cast credits checked`
+    const movieCount = Number(options.movieCount || 0)
+    const seriesCount = Number(options.seriesCount || 0)
+    const vaultParts = [
+      movieCount ? `${movieCount} movie${movieCount === 1 ? "" : "s"}` : "",
+      seriesCount ? `${seriesCount} series` : "",
+    ].filter(Boolean).join(" · ")
+    actorMatchMeta.textContent = vaultParts || `${department} · ${options.creditsCount || 0} cast credits checked`
   }
 
   if (actor.profile_path) {
@@ -1097,6 +1218,7 @@ function hideActorMatchBanner() {
   if (!actorMatchBanner) return
   actorMatchBanner.hidden = true
   actorMatchBanner.classList.remove("is-loading", "has-error")
+  if (actorCopyBtn) actorCopyBtn.disabled = true
 }
 
 function setActorSearchBusy(busy) {
@@ -1106,6 +1228,37 @@ function setActorSearchBusy(busy) {
   searchBtn.innerHTML = busy
     ? `<i class="fas fa-circle-notch fa-spin"></i>`
     : `<i class="fas fa-arrow-right"></i>`
+}
+
+
+async function copyActorRecommendationList() {
+  const actor = actorSearchState.selected
+  if (!actor || !currentResults.length) return
+
+  const lines = currentResults.map((item, index) => {
+    const year = item.display_year || item.release_year || ""
+    const type = item.media_type === "series" ? "Series" : "Movie"
+    return `${index + 1}. ${item.title}${year ? ` (${year})` : ""} — ${type}`
+  })
+  const text = `${actor.name} — ${currentResults.length} title${currentResults.length === 1 ? "" : "s"} in my collection\n\n${lines.join("\n")}`
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textarea = document.createElement("textarea")
+      textarea.value = text
+      textarea.style.position = "fixed"
+      textarea.style.opacity = "0"
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand("copy")
+      textarea.remove()
+    }
+    showToast(`Copied ${currentResults.length} ${actor.name} title${currentResults.length === 1 ? "" : "s"}`, "success")
+  } catch (error) {
+    showToast("Could not copy the recommendation list", "error")
+  }
 }
 
 function clearActorSearch() {
