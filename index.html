@@ -670,6 +670,27 @@
 
           <div id="actor-profile-error" class="actor-profile-error" hidden></div>
 
+          <section id="actor-vault-showcase" class="actor-vault-showcase" hidden>
+            <div class="actor-vault-showcase-head">
+              <div>
+                <span class="actor-profile-section-kicker"><i class="fas fa-vault"></i> Your collection</span>
+                <h3 id="actor-vault-showcase-title">Titles in your vault</h3>
+                <p id="actor-vault-showcase-summary"></p>
+              </div>
+              <div class="actor-vault-showcase-actions">
+                <div class="actor-vault-filters" role="tablist" aria-label="Filter titles in your collection">
+                  <button type="button" class="actor-vault-filter active" data-actor-vault-filter="all">All</button>
+                  <button type="button" class="actor-vault-filter" data-actor-vault-filter="movie">Movies</button>
+                  <button type="button" class="actor-vault-filter" data-actor-vault-filter="series">Series</button>
+                </div>
+                <button type="button" class="actor-career-jump" data-actor-scroll-career>
+                  Full career <i class="fas fa-arrow-down"></i>
+                </button>
+              </div>
+            </div>
+            <div id="actor-vault-grid" class="actor-vault-grid"></div>
+          </section>
+
           <section id="actor-profile-content" class="actor-profile-content">
             <div class="actor-profile-main">
               <article class="actor-profile-panel actor-bio-panel">
@@ -687,8 +708,8 @@
               <article class="actor-profile-panel actor-filmography-panel">
                 <div class="actor-filmography-head">
                   <div>
-                    <span class="actor-profile-section-kicker">Credits</span>
-                    <h3>Filmography</h3>
+                    <span class="actor-profile-section-kicker">All works</span>
+                    <h3>Complete career</h3>
                     <p id="actor-filmography-summary"></p>
                   </div>
                   <div class="actor-filmography-filters" role="tablist" aria-label="Filter filmography">
@@ -712,9 +733,12 @@
               </article>
 
               <article id="actor-vault-panel" class="actor-profile-panel actor-vault-panel">
-                <span class="actor-profile-section-kicker">Your collection</span>
-                <h3>Inside your vault</h3>
+                <span class="actor-profile-section-kicker">Collection snapshot</span>
+                <h3>Your saved titles</h3>
                 <div id="actor-vault-summary" class="actor-vault-summary"></div>
+                <button type="button" class="actor-vault-focus-btn" data-actor-scroll-vault hidden>
+                  <i class="fas fa-table-cells-large"></i> View saved titles
+                </button>
               </article>
             </aside>
           </section>

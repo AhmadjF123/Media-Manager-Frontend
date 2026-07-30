@@ -125,6 +125,7 @@ const actorProfileState = {
   credits: [],
   filter: "all",
   visibleLimit: 24,
+  vaultFilter: "all",
   requestSerial: 0,
   vaultLookup: null,
 }
@@ -2216,6 +2217,10 @@ function renderActorProfileLoading() {
   getActorProfileElement("actor-filmography-summary").textContent = "Gathering credits…"
   getActorProfileElement("actor-known-for").innerHTML = ""
   getActorProfileElement("actor-vault-summary").innerHTML = ""
+  const vaultShowcase = getActorProfileElement("actor-vault-showcase")
+  if (vaultShowcase) vaultShowcase.hidden = true
+  const vaultGrid = getActorProfileElement("actor-vault-grid")
+  if (vaultGrid) vaultGrid.innerHTML = ""
   getActorProfileElement("actor-profile-error").hidden = true
   getActorProfileElement("actor-profile-content").hidden = false
   getActorProfileElement("actor-filmography-more").hidden = true
@@ -2338,6 +2343,7 @@ function renderActorProfile(person) {
   actorProfileState.person = person
   actorProfileState.credits = normaliseActorCredits(person)
   actorProfileState.filter = "all"
+  actorProfileState.vaultFilter = "all"
   actorProfileState.visibleLimit = 24
   actorProfileState.vaultLookup = buildActorVaultLookup()
 
@@ -2379,6 +2385,7 @@ function renderActorProfile(person) {
   const seriesCount = actorProfileState.credits.filter(c => c._mediaType === "series").length
   const vaultCount = actorProfileState.credits.filter(findVaultItemForActorCredit).length
   getActorProfileElement("actor-profile-stats").innerHTML = `
+    <div class="actor-profile-stat actor-profile-stat-vault"><strong>${vaultCount}</strong><span>In vault</span></div>
     <div class="actor-profile-stat"><strong>${actorProfileState.credits.length}</strong><span>Credits</span></div>
     <div class="actor-profile-stat"><strong>${movieCount}</strong><span>Movies</span></div>
     <div class="actor-profile-stat"><strong>${seriesCount}</strong><span>Series</span></div>`
@@ -2401,15 +2408,91 @@ function renderActorProfile(person) {
     ? highlights.map(credit => renderActorHighlight(credit)).join("")
     : `<p class="actor-profile-empty">No highlighted credits available.</p>`
 
+  const vaultCredits = getActorVaultCredits()
+  const vaultMovieCount = vaultCredits.filter(({ credit }) => credit._mediaType === "movie").length
+  const vaultSeriesCount = vaultCredits.filter(({ credit }) => credit._mediaType === "series").length
   getActorProfileElement("actor-vault-summary").innerHTML = vaultCount
-    ? `<strong>${vaultCount}</strong><span>${vaultCount === 1 ? "title is" : "titles are"} already in your collection.</span>`
+    ? `<strong>${vaultCount}</strong><span>${vaultMovieCount} movie${vaultMovieCount === 1 ? "" : "s"}${vaultMovieCount && vaultSeriesCount ? " · " : ""}${vaultSeriesCount ? `${vaultSeriesCount} series` : ""}</span>`
     : `<strong>0</strong><span>No matching titles in your collection yet.</span>`
   getActorProfileElement("actor-vault-panel").classList.toggle("has-vault-items", vaultCount > 0)
+  const vaultFocusButton = document.querySelector("[data-actor-scroll-vault]")
+  if (vaultFocusButton) vaultFocusButton.hidden = vaultCount === 0
+  document.querySelectorAll(".actor-vault-filter").forEach(button => {
+    button.classList.toggle("active", button.dataset.actorVaultFilter === "all")
+  })
+  renderActorVaultShowcase()
 
   document.querySelectorAll(".actor-filmography-filter").forEach(button => {
     button.classList.toggle("active", button.dataset.actorFilter === "all")
   })
   renderActorFilmography()
+}
+
+function getActorVaultCredits() {
+  return actorProfileState.credits
+    .map(credit => ({ credit, vaultItem: findVaultItemForActorCredit(credit) }))
+    .filter(entry => entry.vaultItem)
+    .sort((a, b) => {
+      const aAdded = new Date(a.vaultItem.added_at || a.vaultItem.created_at || 0).getTime()
+      const bAdded = new Date(b.vaultItem.added_at || b.vaultItem.created_at || 0).getTime()
+      return (bAdded - aAdded)
+        || Number(b.vaultItem.rating || 0) - Number(a.vaultItem.rating || 0)
+        || a.credit._title.localeCompare(b.credit._title)
+    })
+}
+
+function renderActorVaultShowcase() {
+  const showcase = getActorProfileElement("actor-vault-showcase")
+  const grid = getActorProfileElement("actor-vault-grid")
+  const title = getActorProfileElement("actor-vault-showcase-title")
+  const summary = getActorProfileElement("actor-vault-showcase-summary")
+  if (!showcase || !grid || !summary) return
+
+  const allEntries = getActorVaultCredits()
+  showcase.hidden = allEntries.length === 0
+  if (!allEntries.length) {
+    grid.innerHTML = ""
+    return
+  }
+
+  const personName = actorProfileState.person?.name || "This performer"
+  title.textContent = `${personName} in your vault`
+  const movieCount = allEntries.filter(entry => entry.credit._mediaType === "movie").length
+  const seriesCount = allEntries.filter(entry => entry.credit._mediaType === "series").length
+  summary.textContent = `${allEntries.length} saved title${allEntries.length === 1 ? "" : "s"} · ${movieCount} movie${movieCount === 1 ? "" : "s"} · ${seriesCount} series`
+
+  const visible = allEntries.filter(({ credit }) =>
+    actorProfileState.vaultFilter === "all" || credit._mediaType === actorProfileState.vaultFilter
+  )
+
+  if (!visible.length) {
+    grid.innerHTML = `<div class="actor-vault-empty"><i class="fas fa-film"></i>No saved titles in this category.</div>`
+    return
+  }
+
+  grid.innerHTML = visible.map(({ credit, vaultItem }) => {
+    const posterUrl = vaultItem.poster_url || (credit.poster_path ? `${TMDB_IMAGE_URL}${credit.poster_path}` : "")
+    const poster = posterUrl
+      ? `<img src="${escapeHtml(posterUrl)}" alt="${escapeHtml(vaultItem.title || credit._title)}" loading="lazy">`
+      : `<span class="actor-vault-card-ph"><i class="fas ${credit._mediaType === "series" ? "fa-tv" : "fa-film"}"></i></span>`
+    const year = vaultItem.release_year || credit._year || "—"
+    const rating = Number(vaultItem.rating || credit._rating || 0)
+    const character = credit._character || "Cast"
+    return `
+      <button type="button" class="actor-vault-card" data-actor-work-key="${escapeHtml(credit._key)}" title="Open ${escapeHtml(vaultItem.title || credit._title)}">
+        <span class="actor-vault-card-poster">
+          ${poster}
+          <span class="actor-vault-card-year">${escapeHtml(String(year))}</span>
+          ${rating > 0 ? `<span class="actor-vault-card-rating"><i class="fas fa-star"></i>${rating.toFixed(1)}</span>` : ""}
+          <span class="actor-vault-card-type ${credit._mediaType}">${credit._mediaType === "series" ? "Series" : "Movie"}</span>
+        </span>
+        <span class="actor-vault-card-body">
+          <strong>${escapeHtml(vaultItem.title || credit._title)}</strong>
+          <small><i class="fas fa-masks-theater"></i>${escapeHtml(character)}</small>
+          <span>Open from your collection <i class="fas fa-arrow-right"></i></span>
+        </span>
+      </button>`
+  }).join("")
 }
 
 function renderActorHighlight(credit) {
@@ -2494,6 +2577,28 @@ function handleActorProfileClick(event) {
     return
   }
 
+  const vaultFilterButton = event.target.closest("[data-actor-vault-filter]")
+  if (vaultFilterButton) {
+    actorProfileState.vaultFilter = vaultFilterButton.dataset.actorVaultFilter
+    document.querySelectorAll(".actor-vault-filter").forEach(button => {
+      button.classList.toggle("active", button === vaultFilterButton)
+    })
+    renderActorVaultShowcase()
+    return
+  }
+
+  const scrollVaultButton = event.target.closest("[data-actor-scroll-vault]")
+  if (scrollVaultButton) {
+    getActorProfileElement("actor-vault-showcase")?.scrollIntoView({ behavior: "smooth", block: "start" })
+    return
+  }
+
+  const scrollCareerButton = event.target.closest("[data-actor-scroll-career]")
+  if (scrollCareerButton) {
+    document.querySelector(".actor-filmography-panel")?.scrollIntoView({ behavior: "smooth", block: "start" })
+    return
+  }
+
   const workButton = event.target.closest("[data-actor-work-key]")
   if (workButton) openActorWork(workButton.dataset.actorWorkKey)
 }
@@ -2522,6 +2627,7 @@ async function openActorProfile(personId) {
   actorProfileState.person = null
   actorProfileState.credits = []
   actorProfileState.filter = "all"
+  actorProfileState.vaultFilter = "all"
   actorProfileState.visibleLimit = 24
   renderActorProfileLoading()
 

@@ -4312,13 +4312,13 @@ body.light-theme .ps-notes-text {
 }
 .actor-profile-stats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  grid-template-columns: repeat(4, minmax(68px, 1fr));
   gap: 10px;
   align-self: end;
   padding-bottom: 8px;
 }
 .actor-profile-stat {
-  min-width: 84px;
+  min-width: 74px;
   padding: 15px 12px;
   border: 1px solid rgba(255,255,255,.08);
   border-radius: 16px;
@@ -4347,6 +4347,234 @@ body.light-theme .ps-notes-text {
   animation: actorProfileShimmer 1.2s linear infinite;
 }
 @keyframes actorProfileShimmer { to { background-position: -220% 0; } }
+
+
+.actor-profile-error[hidden],
+.actor-vault-showcase[hidden] { display: none !important; }
+
+.actor-vault-showcase {
+  position: relative;
+  margin: 24px 30px 0;
+  padding: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(212,168,67,.23);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 8% 0%, rgba(212,168,67,.17), transparent 36%),
+    linear-gradient(145deg, rgba(212,168,67,.08), rgba(255,255,255,.025));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 18px 45px rgba(0,0,0,.16);
+  scroll-margin-top: 18px;
+}
+.actor-vault-showcase::after {
+  content: "";
+  position: absolute;
+  width: 240px;
+  height: 240px;
+  right: -110px;
+  bottom: -140px;
+  border-radius: 50%;
+  background: rgba(212,168,67,.09);
+  filter: blur(20px);
+  pointer-events: none;
+}
+.actor-vault-showcase-head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+.actor-vault-showcase-head h3 {
+  margin: 5px 0 0;
+  color: #f0eadf;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1.7rem;
+  line-height: 1;
+}
+.actor-vault-showcase-head p {
+  margin: 7px 0 0;
+  color: rgba(232,226,212,.5);
+  font-size: .72rem;
+}
+.actor-vault-showcase-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.actor-vault-filters {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 999px;
+  background: rgba(0,0,0,.18);
+}
+.actor-vault-filter,
+.actor-career-jump,
+.actor-vault-focus-btn {
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+.actor-vault-filter {
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(232,226,212,.50);
+  font-size: .68rem;
+  transition: background .18s ease, color .18s ease, box-shadow .18s ease;
+}
+.actor-vault-filter.active,
+.actor-vault-filter:hover {
+  color: #0b0905;
+  background: linear-gradient(135deg, #e3bc4c, #bd892b);
+  box-shadow: 0 5px 15px rgba(212,168,67,.18);
+}
+.actor-career-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 13px;
+  border: 1px solid rgba(212,168,67,.20);
+  border-radius: 999px;
+  background: rgba(212,168,67,.07);
+  color: var(--gold-light);
+  font-size: .68rem;
+  font-weight: 600;
+  transition: transform .18s ease, background .18s ease, border-color .18s ease;
+}
+.actor-career-jump:hover {
+  transform: translateY(-2px);
+  border-color: rgba(212,168,67,.40);
+  background: rgba(212,168,67,.13);
+}
+.actor-vault-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 14px;
+  margin-top: 20px;
+}
+.actor-vault-card {
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(212,168,67,.20);
+  border-radius: 17px;
+  background: rgba(7,7,14,.58);
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 12px 25px rgba(0,0,0,.15);
+  transition: transform .22s ease, border-color .22s ease, box-shadow .22s ease, background .22s ease;
+}
+.actor-vault-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(212,168,67,.52);
+  background: rgba(212,168,67,.08);
+  box-shadow: 0 20px 38px rgba(0,0,0,.28), 0 0 0 1px rgba(212,168,67,.08);
+}
+.actor-vault-card-poster {
+  position: relative;
+  display: block;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  background: rgba(255,255,255,.035);
+}
+.actor-vault-card-poster > img,
+.actor-vault-card-ph {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.actor-vault-card-ph {
+  display: grid;
+  place-items: center;
+  color: rgba(212,168,67,.30);
+  font-size: 2rem;
+  background: linear-gradient(145deg, rgba(212,168,67,.07), rgba(255,255,255,.02));
+}
+.actor-vault-card-year,
+.actor-vault-card-rating,
+.actor-vault-card-type {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  backdrop-filter: blur(9px);
+  font-size: .57rem;
+  font-weight: 700;
+}
+.actor-vault-card-year { top: 8px; left: 8px; background: rgba(5,5,12,.78); color: #fff; }
+.actor-vault-card-rating { top: 8px; right: 8px; border: 1px solid rgba(212,168,67,.34); background: rgba(7,7,14,.78); color: var(--gold-light); }
+.actor-vault-card-type { left: 8px; bottom: 8px; background: rgba(5,5,12,.78); color: #fff; }
+.actor-vault-card-type.movie { border: 1px solid rgba(91,128,255,.42); }
+.actor-vault-card-type.series { border: 1px solid rgba(185,122,255,.44); }
+.actor-vault-card-body { display: block; padding: 12px; }
+.actor-vault-card-body strong {
+  display: block;
+  overflow: hidden;
+  color: #f2ebdf;
+  font-size: .80rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.actor-vault-card-body small {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  overflow: hidden;
+  color: rgba(232,226,212,.52);
+  font-size: .62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.actor-vault-card-body small i { color: var(--gold); }
+.actor-vault-card-body > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 11px;
+  color: var(--gold-light);
+  font-size: .60rem;
+  font-weight: 600;
+}
+.actor-vault-empty {
+  grid-column: 1 / -1;
+  min-height: 130px;
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  color: rgba(232,226,212,.48);
+  font-size: .72rem;
+}
+.actor-vault-focus-btn {
+  width: 100%;
+  margin-top: 16px;
+  padding: 10px 13px;
+  border: 1px solid rgba(212,168,67,.22);
+  border-radius: 12px;
+  background: rgba(212,168,67,.08);
+  color: var(--gold-light);
+  font-size: .69rem;
+  font-weight: 600;
+  transition: background .18s ease, border-color .18s ease;
+}
+.actor-vault-focus-btn:hover { background: rgba(212,168,67,.14); border-color: rgba(212,168,67,.40); }
+.actor-profile-stat-vault {
+  border-color: rgba(212,168,67,.24);
+  background: linear-gradient(145deg, rgba(212,168,67,.12), rgba(255,255,255,.03));
+}
+.actor-filmography-panel { scroll-margin-top: 18px; }
 
 .actor-profile-content {
   display: grid;
@@ -4769,6 +4997,43 @@ body.light-theme .actor-vault-panel.has-vault-items {
   background: linear-gradient(135deg, rgba(212,168,67,.13), rgba(255,255,255,.50));
 }
 body.light-theme .actor-profile-error span { color: #805a50; }
+
+body.light-theme .actor-vault-showcase {
+  border-color: rgba(181,127,28,.22);
+  background:
+    radial-gradient(circle at 8% 0%, rgba(212,168,67,.18), transparent 36%),
+    linear-gradient(145deg, rgba(255,255,255,.82), rgba(248,239,220,.68));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.95), 0 18px 45px rgba(74,55,25,.10);
+}
+body.light-theme .actor-vault-showcase-head h3 { color: #2b2216; }
+body.light-theme .actor-vault-showcase-head p { color: #7f6f58; }
+body.light-theme .actor-vault-filters { border-color: rgba(88,67,31,.10); background: rgba(88,67,31,.045); }
+body.light-theme .actor-vault-filter { color: #71634d; }
+body.light-theme .actor-career-jump {
+  border-color: rgba(181,127,28,.20);
+  background: rgba(212,168,67,.10);
+  color: #7a5517;
+}
+body.light-theme .actor-vault-card {
+  border-color: rgba(181,127,28,.20);
+  background: rgba(255,255,255,.78);
+  box-shadow: 0 12px 25px rgba(74,55,25,.10);
+}
+body.light-theme .actor-vault-card:hover {
+  border-color: rgba(181,127,28,.42);
+  background: rgba(255,251,242,.98);
+  box-shadow: 0 20px 38px rgba(74,55,25,.16);
+}
+body.light-theme .actor-vault-card-body strong { color: #332a1d; }
+body.light-theme .actor-vault-card-body small { color: #7c6c56; }
+body.light-theme .actor-vault-card-body > span { color: #8a6018; }
+body.light-theme .actor-vault-empty { color: #806f56; }
+body.light-theme .actor-vault-focus-btn { color: #7a5517; background: rgba(212,168,67,.10); }
+body.light-theme .actor-profile-stat-vault {
+  border-color: rgba(181,127,28,.22);
+  background: linear-gradient(145deg, rgba(212,168,67,.14), rgba(255,255,255,.58));
+}
+
 body.light-theme .actor-work-skeleton {
   background: linear-gradient(90deg, #eee8dd, #fff, #eee8dd);
   background-size: 220% 100%;
@@ -4785,6 +5050,7 @@ body.light-theme .cast-chip-copy small { color: #85765f; }
     grid-column: 1 / -1;
     width: 100%;
   }
+  .actor-vault-showcase { margin: 22px 24px 0; }
   .actor-profile-content { grid-template-columns: 1fr; }
   .actor-profile-side {
     display: grid;
@@ -4810,6 +5076,10 @@ body.light-theme .cast-chip-copy small { color: #85765f; }
   .actor-profile-socials a { width: 32px; height: 32px; justify-content: center; padding: 0; }
   .actor-profile-stats { grid-column: 1 / -1; }
   .actor-profile-stat { min-width: 0; padding: 11px 6px; }
+  .actor-vault-showcase { margin: 16px 14px 0; padding: 17px; border-radius: 18px; }
+  .actor-vault-showcase-head { align-items: flex-start; flex-direction: column; }
+  .actor-vault-showcase-actions { width: 100%; justify-content: space-between; }
+  .actor-vault-grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
   .actor-profile-content { padding: 18px 14px 28px; }
   .actor-profile-panel { padding: 17px; border-radius: 17px; }
   .actor-filmography-head { align-items: flex-start; flex-direction: column; }
@@ -4823,6 +5093,8 @@ body.light-theme .cast-chip-copy small { color: #85765f; }
   .actor-profile-hero { grid-template-columns: 88px minmax(0,1fr); }
   .actor-profile-portrait-wrap { width: 88px; }
   .actor-profile-heading h2 { font-size: 1.9rem; }
+  .actor-vault-grid { grid-template-columns: 1fr 1fr; }
+  .actor-vault-card-body > span { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
