@@ -312,6 +312,7 @@ async function init() {
   }
   themeCheckbox.addEventListener("change", toggleTheme)
 
+  initFancySearchSelects()
   updateEndYearVisibility()
   bindDatePickerButtons()
   bindSortControls()
@@ -748,9 +749,119 @@ function prepareDisplayResults(results) {
   )
 }
 
+
+function refreshActorSearchPanelVisibility() {
+  if (!actorSearchPanel) return
+  const isActorMode = searchBySelect.value === "actor"
+  const hasSuggestions = actorSuggestions && !actorSuggestions.hidden && actorSuggestions.innerHTML.trim() !== ""
+  const hasBanner = actorMatchBanner && !actorMatchBanner.hidden
+  actorSearchPanel.hidden = !(isActorMode && (hasSuggestions || hasBanner))
+}
+
+function closeFancySearchSelects(except = null) {
+  document.querySelectorAll('.fancy-select.open').forEach(el => {
+    if (el !== except) el.classList.remove('open')
+  })
+}
+
+function getFancySelectOptionMeta(selectId, value) {
+  const maps = {
+    'search-by': {
+      title: { icon: 'fa-font' },
+      actor: { icon: 'fa-user' },
+      release_year: { icon: 'fa-calendar-days' },
+      genre: { icon: 'fa-masks-theater' },
+      rating: { icon: 'fa-star' },
+    },
+    'filter-type': {
+      all: { icon: 'fa-layer-group' },
+      movie: { icon: 'fa-film' },
+      series: { icon: 'fa-tv' },
+    }
+  }
+  return maps[selectId]?.[value] || { icon: 'fa-check' }
+}
+
+function buildFancySearchSelect(selectEl) {
+  if (!selectEl || selectEl.dataset.enhanced === 'true') return null
+  selectEl.dataset.enhanced = 'true'
+  selectEl.classList.add('native-select-hidden')
+
+  const wrapper = document.createElement('div')
+  wrapper.className = `fancy-select ${selectEl.id === 'filter-type' ? 'compact' : ''}`
+  wrapper.dataset.forSelect = selectEl.id
+
+  const trigger = document.createElement('button')
+  trigger.type = 'button'
+  trigger.className = 'fancy-select-trigger'
+  trigger.setAttribute('aria-haspopup', 'listbox')
+  trigger.setAttribute('aria-expanded', 'false')
+
+  const label = document.createElement('span')
+  label.className = 'fancy-select-trigger-label'
+  const icon = document.createElement('i')
+  icon.className = 'fas fa-chevron-down fancy-select-trigger-icon'
+  trigger.append(label, icon)
+
+  const menu = document.createElement('div')
+  menu.className = 'fancy-select-menu'
+  menu.setAttribute('role', 'listbox')
+
+  const render = () => {
+    const selectedOption = selectEl.options[selectEl.selectedIndex]
+    label.textContent = selectedOption?.textContent || ''
+    menu.innerHTML = ''
+    Array.from(selectEl.options).forEach(option => {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'fancy-select-option'
+      if (option.value === selectEl.value) btn.classList.add('active')
+      btn.dataset.value = option.value
+      const meta = getFancySelectOptionMeta(selectEl.id, option.value)
+      btn.innerHTML = `<span>${option.textContent}</span><i class="fas ${meta.icon}"></i>`
+      btn.addEventListener('click', () => {
+        if (selectEl.value !== option.value) {
+          selectEl.value = option.value
+          selectEl.dispatchEvent(new Event('change', { bubbles: true }))
+        } else {
+          render()
+        }
+        closeFancySearchSelects()
+      })
+      menu.appendChild(btn)
+    })
+  }
+
+  trigger.addEventListener('click', event => {
+    event.stopPropagation()
+    const willOpen = !wrapper.classList.contains('open')
+    closeFancySearchSelects(wrapper)
+    wrapper.classList.toggle('open', willOpen)
+    trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false')
+  })
+
+  selectEl.addEventListener('change', () => {
+    render()
+    trigger.setAttribute('aria-expanded', 'false')
+    wrapper.classList.remove('open')
+  })
+
+  wrapper.append(trigger, menu)
+  selectEl.insertAdjacentElement('afterend', wrapper)
+  render()
+  return wrapper
+}
+
+function initFancySearchSelects() {
+  buildFancySearchSelect(searchBySelect)
+  buildFancySearchSelect(filterTypeSelect)
+  document.addEventListener('click', event => {
+    if (!event.target.closest('.fancy-select')) closeFancySearchSelects()
+  })
+}
+
 function syncSearchModeUI() {
   const isActorMode = searchBySelect.value === "actor"
-  actorSearchPanel.hidden = !isActorMode
   searchInput.placeholder = isActorMode
     ? "Search an actor — e.g. Cillian Murphy"
     : "Search your vault…"
@@ -763,6 +874,7 @@ function syncSearchModeUI() {
   }
 
   document.querySelector(".search-wrap")?.classList.toggle("actor-mode", isActorMode)
+  refreshActorSearchPanelVisibility()
 }
 
 function handleSearchModeChange() {
@@ -911,6 +1023,7 @@ function renderActorSuggestions(people, query) {
           <span>Try the full name, or switch the media filter to “All”.</span>
         </div>
       </div>`
+    refreshActorSearchPanelVisibility()
     return
   }
 
@@ -950,6 +1063,7 @@ function renderActorSuggestions(people, query) {
       if (person) selectActorSuggestion(person)
     })
   })
+  refreshActorSearchPanelVisibility()
 }
 
 function showActorSuggestionsLoading() {
@@ -960,6 +1074,7 @@ function showActorSuggestionsLoading() {
       <span class="actor-loading-orbit"><i class="fas fa-user"></i></span>
       <div><strong>Checking performers in your vault…</strong><span>Only names with matching titles will appear</span></div>
     </div>`
+  refreshActorSearchPanelVisibility()
 }
 
 function renderActorSuggestionsError(message) {
@@ -976,6 +1091,7 @@ function hideActorSuggestions() {
   if (!actorSuggestions) return
   actorSuggestions.hidden = true
   actorSuggestions.innerHTML = ""
+  refreshActorSearchPanelVisibility()
 }
 
 function selectActorSuggestion(person) {
@@ -1185,6 +1301,7 @@ async function searchCollectionByActor(rawQuery, filterType) {
 function renderActorMatchBanner(actor, options = {}) {
   if (!actor || !actorMatchBanner) return
   actorMatchBanner.hidden = false
+  refreshActorSearchPanelVisibility()
   actorMatchBanner.classList.toggle("is-loading", Boolean(options.loading))
   actorMatchBanner.classList.toggle("has-error", Boolean(options.error))
 
@@ -1219,6 +1336,7 @@ function hideActorMatchBanner() {
   actorMatchBanner.hidden = true
   actorMatchBanner.classList.remove("is-loading", "has-error")
   if (actorCopyBtn) actorCopyBtn.disabled = true
+  refreshActorSearchPanelVisibility()
 }
 
 function setActorSearchBusy(busy) {
