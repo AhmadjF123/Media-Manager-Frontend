@@ -143,18 +143,49 @@
               class="search-inp"
               placeholder="Search your vault…"
             />
-            <select id="search-by" class="sel-chip">
+            <select id="search-by" class="sel-chip native-select-hidden" aria-label="Search by">
               <option value="title">Title</option>
               <option value="actor">Actor</option>
               <option value="release_year">Year</option>
               <option value="genre">Genre</option>
               <option value="rating">Rating</option>
             </select>
-            <select id="filter-type" class="sel-chip">
+            <div class="fancy-select search-kind-select" data-for-select="search-by">
+              <button type="button" class="fancy-select-trigger" aria-haspopup="listbox" aria-expanded="false">
+                <span class="fancy-select-trigger-main">
+                  <i class="fas fa-font fancy-select-current-icon"></i>
+                  <span class="fancy-select-trigger-label">Title</span>
+                </span>
+                <i class="fas fa-chevron-down fancy-select-trigger-icon"></i>
+              </button>
+              <div class="fancy-select-menu" role="listbox" aria-label="Search by">
+                <button type="button" class="fancy-select-option active" data-value="title" role="option" aria-selected="true"><span class="fancy-select-option-main"><i class="fas fa-font"></i><span>Title</span></span><i class="fas fa-check fancy-select-check"></i></button>
+                <button type="button" class="fancy-select-option" data-value="actor" role="option" aria-selected="false"><span class="fancy-select-option-main"><i class="fas fa-user"></i><span>Actor</span></span><i class="fas fa-check fancy-select-check"></i></button>
+                <button type="button" class="fancy-select-option" data-value="release_year" role="option" aria-selected="false"><span class="fancy-select-option-main"><i class="fas fa-calendar-days"></i><span>Year</span></span><i class="fas fa-check fancy-select-check"></i></button>
+                <button type="button" class="fancy-select-option" data-value="genre" role="option" aria-selected="false"><span class="fancy-select-option-main"><i class="fas fa-masks-theater"></i><span>Genre</span></span><i class="fas fa-check fancy-select-check"></i></button>
+                <button type="button" class="fancy-select-option" data-value="rating" role="option" aria-selected="false"><span class="fancy-select-option-main"><i class="fas fa-star"></i><span>Rating</span></span><i class="fas fa-check fancy-select-check"></i></button>
+              </div>
+            </div>
+
+            <select id="filter-type" class="sel-chip native-select-hidden" aria-label="Media type">
               <option value="all">All</option>
               <option value="movie">Movies</option>
               <option value="series">Series</option>
             </select>
+            <div class="fancy-select compact media-filter-select" data-for-select="filter-type">
+              <button type="button" class="fancy-select-trigger" aria-haspopup="listbox" aria-expanded="false">
+                <span class="fancy-select-trigger-main">
+                  <i class="fas fa-layer-group fancy-select-current-icon"></i>
+                  <span class="fancy-select-trigger-label">All</span>
+                </span>
+                <i class="fas fa-chevron-down fancy-select-trigger-icon"></i>
+              </button>
+              <div class="fancy-select-menu" role="listbox" aria-label="Media type">
+                <button type="button" class="fancy-select-option active" data-value="all" role="option" aria-selected="true"><span class="fancy-select-option-main"><i class="fas fa-layer-group"></i><span>All</span></span><i class="fas fa-check fancy-select-check"></i></button>
+                <button type="button" class="fancy-select-option" data-value="movie" role="option" aria-selected="false"><span class="fancy-select-option-main"><i class="fas fa-film"></i><span>Movies</span></span><i class="fas fa-check fancy-select-check"></i></button>
+                <button type="button" class="fancy-select-option" data-value="series" role="option" aria-selected="false"><span class="fancy-select-option-main"><i class="fas fa-tv"></i><span>Series</span></span><i class="fas fa-check fancy-select-check"></i></button>
+              </div>
+            </div>
             <button id="search-btn" class="search-go">
               <i class="fas fa-arrow-right"></i>
             </button>

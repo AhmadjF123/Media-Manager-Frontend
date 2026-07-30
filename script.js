@@ -760,7 +760,10 @@ function refreshActorSearchPanelVisibility() {
 
 function closeFancySearchSelects(except = null) {
   document.querySelectorAll('.fancy-select.open').forEach(el => {
-    if (el !== except) el.classList.remove('open')
+    if (el !== except) {
+      el.classList.remove('open')
+      el.querySelector('.fancy-select-trigger')?.setAttribute('aria-expanded', 'false')
+    }
   })
 }
 
@@ -782,57 +785,63 @@ function getFancySelectOptionMeta(selectId, value) {
   return maps[selectId]?.[value] || { icon: 'fa-check' }
 }
 
-function buildFancySearchSelect(selectEl) {
-  if (!selectEl || selectEl.dataset.enhanced === 'true') return null
-  selectEl.dataset.enhanced = 'true'
-  selectEl.classList.add('native-select-hidden')
-
+function createFancySearchSelectMarkup(selectEl) {
   const wrapper = document.createElement('div')
   wrapper.className = `fancy-select ${selectEl.id === 'filter-type' ? 'compact' : ''}`
   wrapper.dataset.forSelect = selectEl.id
+  wrapper.innerHTML = `
+    <button type="button" class="fancy-select-trigger" aria-haspopup="listbox" aria-expanded="false">
+      <span class="fancy-select-trigger-main">
+        <i class="fas fa-check fancy-select-current-icon"></i>
+        <span class="fancy-select-trigger-label"></span>
+      </span>
+      <i class="fas fa-chevron-down fancy-select-trigger-icon"></i>
+    </button>
+    <div class="fancy-select-menu" role="listbox"></div>`
+  selectEl.insertAdjacentElement('afterend', wrapper)
+  return wrapper
+}
 
-  const trigger = document.createElement('button')
-  trigger.type = 'button'
-  trigger.className = 'fancy-select-trigger'
-  trigger.setAttribute('aria-haspopup', 'listbox')
-  trigger.setAttribute('aria-expanded', 'false')
+function buildFancySearchSelect(selectEl) {
+  if (!selectEl) return null
+  selectEl.classList.add('native-select-hidden')
 
-  const label = document.createElement('span')
-  label.className = 'fancy-select-trigger-label'
-  const icon = document.createElement('i')
-  icon.className = 'fas fa-chevron-down fancy-select-trigger-icon'
-  trigger.append(label, icon)
+  const wrapper = document.querySelector(`.fancy-select[data-for-select="${selectEl.id}"]`)
+    || createFancySearchSelectMarkup(selectEl)
+  if (wrapper.dataset.bound === 'true') return wrapper
+  wrapper.dataset.bound = 'true'
 
-  const menu = document.createElement('div')
-  menu.className = 'fancy-select-menu'
-  menu.setAttribute('role', 'listbox')
+  const trigger = wrapper.querySelector('.fancy-select-trigger')
+  const label = wrapper.querySelector('.fancy-select-trigger-label')
+  const currentIcon = wrapper.querySelector('.fancy-select-current-icon')
+  const menu = wrapper.querySelector('.fancy-select-menu')
+
+  const ensureOptions = () => {
+    if (menu.querySelector('.fancy-select-option')) return
+    menu.innerHTML = Array.from(selectEl.options).map(option => {
+      const meta = getFancySelectOptionMeta(selectEl.id, option.value)
+      return `<button type="button" class="fancy-select-option" data-value="${option.value}" role="option">
+        <span class="fancy-select-option-main"><i class="fas ${meta.icon}"></i><span>${option.textContent}</span></span>
+        <i class="fas fa-check fancy-select-check"></i>
+      </button>`
+    }).join('')
+  }
 
   const render = () => {
+    ensureOptions()
     const selectedOption = selectEl.options[selectEl.selectedIndex]
+    const meta = getFancySelectOptionMeta(selectEl.id, selectEl.value)
     label.textContent = selectedOption?.textContent || ''
-    menu.innerHTML = ''
-    Array.from(selectEl.options).forEach(option => {
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'fancy-select-option'
-      if (option.value === selectEl.value) btn.classList.add('active')
-      btn.dataset.value = option.value
-      const meta = getFancySelectOptionMeta(selectEl.id, option.value)
-      btn.innerHTML = `<span>${option.textContent}</span><i class="fas ${meta.icon}"></i>`
-      btn.addEventListener('click', () => {
-        if (selectEl.value !== option.value) {
-          selectEl.value = option.value
-          selectEl.dispatchEvent(new Event('change', { bubbles: true }))
-        } else {
-          render()
-        }
-        closeFancySearchSelects()
-      })
-      menu.appendChild(btn)
+    currentIcon.className = `fas ${meta.icon} fancy-select-current-icon`
+    menu.querySelectorAll('.fancy-select-option').forEach(button => {
+      const active = button.dataset.value === selectEl.value
+      button.classList.toggle('active', active)
+      button.setAttribute('aria-selected', active ? 'true' : 'false')
     })
   }
 
   trigger.addEventListener('click', event => {
+    event.preventDefault()
     event.stopPropagation()
     const willOpen = !wrapper.classList.contains('open')
     closeFancySearchSelects(wrapper)
@@ -840,14 +849,21 @@ function buildFancySearchSelect(selectEl) {
     trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false')
   })
 
-  selectEl.addEventListener('change', () => {
-    render()
-    trigger.setAttribute('aria-expanded', 'false')
+  menu.addEventListener('click', event => {
+    const optionButton = event.target.closest('.fancy-select-option')
+    if (!optionButton) return
+    const nextValue = optionButton.dataset.value
+    if (selectEl.value !== nextValue) {
+      selectEl.value = nextValue
+      selectEl.dispatchEvent(new Event('change', { bubbles: true }))
+    } else {
+      render()
+    }
     wrapper.classList.remove('open')
+    trigger.setAttribute('aria-expanded', 'false')
   })
 
-  wrapper.append(trigger, menu)
-  selectEl.insertAdjacentElement('afterend', wrapper)
+  selectEl.addEventListener('change', render)
   render()
   return wrapper
 }
@@ -857,6 +873,9 @@ function initFancySearchSelects() {
   buildFancySearchSelect(filterTypeSelect)
   document.addEventListener('click', event => {
     if (!event.target.closest('.fancy-select')) closeFancySearchSelects()
+  })
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') closeFancySearchSelects()
   })
 }
 

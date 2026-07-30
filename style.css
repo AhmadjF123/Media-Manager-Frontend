@@ -343,9 +343,11 @@ body {
 }
 
 /* ════════════════ SEARCH ════════════════ */
-.search-wrap { margin-bottom: 20px; }
+.search-wrap { position: relative; z-index: 90; margin-bottom: 20px; }
 
 .search-box {
+  position: relative;
+  z-index: 100;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -410,9 +412,10 @@ body {
 .fancy-select {
   position: relative;
   flex: 0 0 auto;
-  min-width: 114px;
+  min-width: 148px;
+  z-index: 110;
 }
-.fancy-select.compact { min-width: 102px; }
+.fancy-select.compact { min-width: 132px; }
 .fancy-select-trigger {
   min-width: 100%;
   height: 40px;
@@ -444,6 +447,21 @@ body {
   box-shadow: 0 0 0 3px rgba(212,168,67,.12), 0 12px 28px rgba(0,0,0,.22);
   background: linear-gradient(135deg, rgba(212,168,67,.18), rgba(255,255,255,.05));
 }
+.fancy-select-trigger-main,
+.fancy-select-option-main {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+.fancy-select-current-icon,
+.fancy-select-option-main > i {
+  width: 15px;
+  flex: 0 0 15px;
+  color: var(--gold);
+  text-align: center;
+  font-size: .75rem;
+}
 .fancy-select-trigger-label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -458,8 +476,8 @@ body {
 .fancy-select-menu {
   position: absolute;
   top: calc(100% + 10px);
-  left: 0;
-  min-width: 100%;
+  right: 0;
+  min-width: 210px;
   padding: 8px;
   border-radius: 18px;
   border: 1px solid rgba(212,168,67,.26);
@@ -470,8 +488,9 @@ body {
   transform: translateY(-6px) scale(.98);
   pointer-events: none;
   transition: opacity .18s ease, transform .18s ease;
-  z-index: 80;
+  z-index: 9999;
 }
+.fancy-select.open { z-index: 9998; }
 .fancy-select.open .fancy-select-menu {
   opacity: 1;
   transform: translateY(0) scale(1);
@@ -505,13 +524,17 @@ body {
   background: linear-gradient(135deg, rgba(212,168,67,.18), rgba(212,168,67,.08));
   color: var(--gold-light);
 }
-.fancy-select-option i {
-  color: rgba(212,168,67,.75);
-  font-size: .72rem;
+.fancy-select-check {
+  color: var(--gold);
+  font-size: .68rem;
   opacity: 0;
-  transition: opacity .18s ease;
+  transform: scale(.75);
+  transition: opacity .18s ease, transform .18s ease;
 }
-.fancy-select-option.active i { opacity: 1; }
+.fancy-select-option.active .fancy-select-check {
+  opacity: 1;
+  transform: scale(1);
+}
 body.light-theme .fancy-select-trigger {
   background: linear-gradient(135deg, rgba(255,255,255,.92), rgba(250,245,236,.95));
   border-color: rgba(170,120,30,.20);
@@ -569,16 +592,18 @@ body.light-theme .fancy-select-option.active {
 
 .actor-search-panel {
   position: relative;
+  z-index: 70;
   margin-top: 12px;
-  padding: 12px;
-  border: 1px solid rgba(212,168,67,.2);
-  border-radius: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
   overflow: visible;
-  background:
-    radial-gradient(circle at 10% 0%, rgba(212,168,67,.12), transparent 42%),
-    linear-gradient(145deg, rgba(255,255,255,.045), rgba(255,255,255,.018));
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 18px 45px rgba(0,0,0,.18);
+  background: transparent;
+  box-shadow: none;
   animation: actorPanelIn .35s cubic-bezier(.22,.8,.25,1) both;
+}
+.actor-search-panel:not(:has(.actor-suggestions:not([hidden]), .actor-match-banner:not([hidden]))) {
+  display: none !important;
 }
 .actor-search-panel[hidden],
 .actor-suggestions[hidden],
@@ -898,11 +923,9 @@ body.light-theme .table-actor-role {
 }
 
 body.light-theme .actor-search-panel {
-  background:
-    radial-gradient(circle at 10% 0%, rgba(181,127,28,.15), transparent 42%),
-    rgba(255,255,255,.72);
-  border-color: rgba(154,110,26,.22);
-  box-shadow: inset 0 1px 0 #fff, 0 14px 34px rgba(83,58,24,.08);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
 body.light-theme .actor-suggestions {
   background: rgba(255,252,246,.97);
@@ -917,6 +940,9 @@ body.light-theme .actor-match-copy p { color: #7a5b21; font-weight: 500; }
 body.light-theme .actor-match-count span { color: #7a5b21; }
 
 @media (max-width: 720px) {
+  .fancy-select { min-width: 126px; flex: 1 1 126px; }
+  .fancy-select.compact { min-width: 118px; }
+  .fancy-select-menu { left: 0; right: auto; width: max-content; min-width: 100%; }
   .actor-search-intro { align-items: flex-start; }
   .actor-tmdb-pill { display: none; }
   .actor-search-copy small { line-height: 1.35; }
