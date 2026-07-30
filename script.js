@@ -169,6 +169,105 @@ function clearCollectionSnapshot() {
   try { localStorage.removeItem(getCollectionSnapshotKey()) } catch (_) {}
 }
 
+
+function normaliseMediaItem(item = {}) {
+  return {
+    ...item,
+    order_number: parseInt(item.order_number) || 0,
+    release_year: parseInt(item.release_year) || 0,
+    end_year: parseInt(item.end_year) || 0,
+    rating: parseFloat(item.rating) || 0,
+  }
+}
+
+function applyLocalMediaUpdate(mediaType, orderNumber, mediaData, serverItem = null) {
+  const source = Array.isArray(_cache.data)
+    ? _cache.data
+    : (readCollectionSnapshot() || [])
+
+  let updatedItem = null
+  const nextCollection = source.map(item => {
+    if (item.media_type !== mediaType || Number(item.order_number) !== Number(orderNumber)) {
+      return item
+    }
+
+    updatedItem = normaliseMediaItem({
+      ...item,
+      ...mediaData,
+      ...(serverItem || {}),
+      media_type: mediaType,
+      order_number: orderNumber,
+    })
+    return updatedItem
+  })
+
+  // A defensive fallback for an old snapshot that did not contain the edited item.
+  if (!updatedItem) {
+    updatedItem = normaliseMediaItem({
+      ...mediaData,
+      ...(serverItem || {}),
+      media_type: mediaType,
+      order_number: orderNumber,
+    })
+    nextCollection.push(updatedItem)
+  }
+
+  _cacheSet(nextCollection)
+  saveCollectionSnapshot(nextCollection)
+  _actorVaultCandidatesCache.clear()
+  return updatedItem
+}
+
+function applyLocalMediaInsert(item) {
+  const source = Array.isArray(_cache.data)
+    ? _cache.data
+    : (readCollectionSnapshot() || [])
+  const inserted = normaliseMediaItem(item)
+  const nextCollection = [
+    ...source.filter(existing => !(
+      existing.media_type === inserted.media_type &&
+      Number(existing.order_number) === Number(inserted.order_number)
+    )),
+    inserted,
+  ]
+  _cacheSet(nextCollection)
+  saveCollectionSnapshot(nextCollection)
+  _actorVaultCandidatesCache.clear()
+  return inserted
+}
+
+function applyLocalMediaDelete(mediaType, orderNumber) {
+  const source = Array.isArray(_cache.data)
+    ? _cache.data
+    : (readCollectionSnapshot() || [])
+  const nextCollection = source.filter(item => !(
+    item.media_type === mediaType &&
+    Number(item.order_number) === Number(orderNumber)
+  ))
+  _cacheSet(nextCollection)
+  saveCollectionSnapshot(nextCollection)
+  _actorVaultCandidatesCache.clear()
+  return nextCollection
+}
+
+async function renderAfterLocalMediaUpdate(mediaType, orderNumber, updatedItem) {
+  if (searchBySelect.value === "actor") {
+    const nextResults = currentResults.map(item => {
+      if (item.media_type !== mediaType || Number(item.order_number) !== Number(orderNumber)) return item
+      return {
+        ...item,
+        ...updatedItem,
+        _actorMatch: item._actorMatch,
+      }
+    })
+    updateResultsTable(prepareDisplayResults(nextResults))
+    return
+  }
+
+  // Uses the just-updated in-memory cache, so this redraw performs no network request.
+  await searchMedia({ showSkeleton: false })
+}
+
 // ════════════════════════════════════════════════
 //  API FUNCTIONS
 // ════════════════════════════════════════════════
@@ -240,13 +339,7 @@ async function fetchAllMedia({ showSkeleton = true, force = false } = {}) {
     const data = await response.json()
     if (showSkeleton) hideSkeletons()
     if (!Array.isArray(data)) return []
-    const normalised = data.map(item => ({
-      ...item,
-      order_number: parseInt(item.order_number) || 0,
-      release_year: parseInt(item.release_year) || 0,
-      end_year:     parseInt(item.end_year)     || 0,
-      rating:       parseFloat(item.rating)     || 0,
-    }))
+    const normalised = data.map(normaliseMediaItem)
     _cacheSet(normalised)
     saveCollectionSnapshot(normalised)
     return normalised
@@ -268,7 +361,7 @@ async function fetchMedia(mediaType) {
 }
 
 async function saveMedia(mediaType, mediaData) {
-  if (!currentUser) { openAuthModal('login'); return false }
+  if (!currentUser) { openAuthModal('login'); return null }
   try {
     showLoading()
     const response = await fetch(API_BASE_URL, {
@@ -276,62 +369,65 @@ async function saveMedia(mediaType, mediaData) {
       headers: authHeaders(),
       body: JSON.stringify({ type: mediaType, data: mediaData }),
     })
-    if (response.status === 401) { handleUnauthorized(); return false }
+    if (response.status === 401) { handleUnauthorized(); return null }
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
     const result = await response.json()
     hideLoading()
-    _cacheInvalidate()
-    return result.success
+    if (result.error) throw new Error(result.error)
+    if (result.success !== true) return null
+    return result.item || {
+      ...mediaData,
+      media_type: mediaType,
+      order_number: result.order_number,
+    }
   } catch(error) {
     hideLoading()
-    showToast("Error saving media", "error")
-    return false
+    showToast("Error saving media: " + error.message, "error")
+    return null
   }
 }
 
 async function updateMedia(mediaType, orderNumber, mediaData) {
-  if (!currentUser) { openAuthModal('login'); return false }
+  if (!currentUser) { openAuthModal('login'); return null }
   try {
-    showLoading()
     const response = await fetch(API_BASE_URL, {
       method: "PUT",
       headers: authHeaders(),
       body: JSON.stringify({ type: mediaType, order_number: orderNumber, data: mediaData }),
     })
-    if (response.status === 401) { handleUnauthorized(); return false }
+    if (response.status === 401) { handleUnauthorized(); return null }
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
-    const text = await response.text()
-    let result
-    try { result = JSON.parse(text) } catch(e) {
-      throw new Error(`Invalid JSON: ${text.substring(0,100)}...`)
-    }
-    hideLoading()
-    _cacheInvalidate()
+
+    const result = await response.json()
     if (result.error) throw new Error(result.error)
-    return result.success === true
+    if (result.success !== true) return null
+
+    // New backend versions return the updated document. Older ones remain compatible.
+    return result.item || {
+      ...mediaData,
+      media_type: mediaType,
+      order_number: orderNumber,
+    }
   } catch(error) {
-    hideLoading()
     showToast("Error updating media: " + error.message, "error")
-    return false
+    return null
   }
 }
 
 async function deleteMedia(mediaType, orderNumber) {
   if (!currentUser) { openAuthModal('login'); return false }
   try {
-    showLoading()
     const response = await fetch(API_BASE_URL, {
       method: "DELETE",
       headers: authHeaders(),
       body: JSON.stringify({ type: mediaType, order_number: orderNumber }),
     })
     if (response.status === 401) { handleUnauthorized(); return false }
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
     const result = await response.json()
-    hideLoading()
-    _cacheInvalidate()
-    return result.success
+    return result.success === true
   } catch(error) {
-    hideLoading()
-    showToast("Error deleting media", "error")
+    showToast("Error deleting media: " + error.message, "error")
     return false
   }
 }
@@ -2115,11 +2211,13 @@ async function addMedia(e) {
       }
     }
 
-    const success = await saveMedia(mediaType, newMedia)
-    if (success) {
+    const savedItem = await saveMedia(mediaType, newMedia)
+    if (savedItem) {
+      applyLocalMediaInsert(savedItem)
+      // Redraws the hidden Collection view from memory; no second backend request.
+      await searchMedia({ showSkeleton: false })
       showToast(`"${title}" added to your vault! 🎬`, "success")
       clearForm()
-      await searchMedia()
       // Stay on Add New so another title can be added immediately.
     } else {
       showToast("Failed to add media", "error")
@@ -2439,6 +2537,9 @@ async function fetchEditInfo() {
 async function saveChanges(e) {
   e.preventDefault()
 
+  const saveButton = editForm.querySelector('button[type="submit"]')
+  const originalButtonHtml = saveButton?.innerHTML || ""
+
   try {
     const orderNumber = parseInt(editOrderInput.value)
     const title       = editTitleInput.value.trim()
@@ -2457,7 +2558,6 @@ async function saveChanges(e) {
       release_year: releaseYear,
       rating,
       poster_url: editPosterImage.style.display === "block" ? editPosterImage.src : null,
-      // Personal fields
       notes:         editNotesInput?.value.trim()        || null,
       watch_status:  editWatchStatusSelect?.value        || null,
       watch_date:    editWatchDateInput?.value           || null,
@@ -2471,20 +2571,34 @@ async function saveChanges(e) {
       updatedMedia.end_year = endYear
     }
 
-    showLoading()
-    const success = await updateMedia(mediaType, orderNumber, updatedMedia)
-    hideLoading()
-
-    if (success) {
-      showToast(`"${title}" updated successfully!`, "success")
-      closeModal()
-      await searchMedia()
-    } else {
-      showToast("Failed to update media", "error")
+    if (saveButton) {
+      saveButton.disabled = true
+      saveButton.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Saving…'
     }
+
+    const serverItem = await updateMedia(mediaType, orderNumber, updatedMedia)
+    if (!serverItem) {
+      showToast("Failed to update media", "error")
+      return
+    }
+
+    const updatedItem = applyLocalMediaUpdate(
+      mediaType,
+      orderNumber,
+      updatedMedia,
+      serverItem
+    )
+
+    closeModal()
+    await renderAfterLocalMediaUpdate(mediaType, orderNumber, updatedItem)
+    showToast(`"${title}" updated successfully!`, "success")
   } catch(error) {
-    hideLoading()
     showToast("Error updating media: " + error.message, "error")
+  } finally {
+    if (saveButton) {
+      saveButton.disabled = false
+      saveButton.innerHTML = originalButtonHtml
+    }
   }
 }
 
@@ -2500,23 +2614,33 @@ async function deleteSelected() {
   }
   if (!confirm(`Delete ${checkboxes.length} item(s) from your vault?`)) return
 
-  try {
-    let allSuccess = true
-    for (const cb of checkboxes) {
-      const row       = cb.closest("tr")
-      const cells     = row.cells
-      const orderNum  = parseInt(cells[1].textContent)
-      const mediaType = cells[6].textContent.toLowerCase()
-      const success   = await deleteMedia(mediaType, orderNum)
-      if (!success) allSuccess = false
+  const targets = Array.from(checkboxes).map(cb => {
+    const cells = cb.closest("tr").cells
+    return {
+      orderNumber: parseInt(cells[1].textContent),
+      mediaType: cells[6].textContent.toLowerCase(),
     }
-    if (allSuccess) {
+  })
+
+  try {
+    showLoading()
+    const outcomes = await Promise.all(
+      targets.map(target => deleteMedia(target.mediaType, target.orderNumber))
+    )
+    hideLoading()
+
+    targets.forEach((target, index) => {
+      if (outcomes[index]) applyLocalMediaDelete(target.mediaType, target.orderNumber)
+    })
+
+    await searchMedia({ showSkeleton: false })
+    if (outcomes.every(Boolean)) {
       showToast("Deleted from vault successfully!", "success")
-      await searchMedia()
     } else {
       showToast("Some items could not be deleted", "error")
     }
   } catch(error) {
+    hideLoading()
     showToast("Error deleting: " + error.message, "error")
   }
 }
