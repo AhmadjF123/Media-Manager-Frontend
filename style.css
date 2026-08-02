@@ -3891,7 +3891,8 @@ body.light-theme .sort-option.active { background: linear-gradient(105deg, rgba(
 
 /* Instant refresh path: no decorative shuffle while restoring cached cards. */
 body.instant-hydrate .media-card,
-body.instant-hydrate .card-grid.is-reordering .media-card {
+body.instant-hydrate .card-grid.is-reordering .media-card,
+.card-grid.no-card-entry-animation .media-card {
   animation: none !important;
   transition: none !important;
 }

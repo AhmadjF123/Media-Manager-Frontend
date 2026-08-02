@@ -111,6 +111,7 @@ const editNotesInput        = document.getElementById("edit-notes")
 let currentResults  = []
 let currentGridMode = 'grid'
 let detailRequestSerial = 0
+let _lastResultsRenderSignature = null
 
 // ── Actor search state ──
 const actorSearchState = {
@@ -385,6 +386,8 @@ function showSkeletons(count = 16) {
   if (!grid) return
   // Clear any existing cards
   _cardObserver?.disconnect()
+  _cardObserver = null
+  _cardRenderGeneration += 1
   grid.innerHTML = ""
   const frag = document.createDocumentFragment()
   for (let i = 0; i < count; i++) {
@@ -590,7 +593,7 @@ function hydrateCollectionSnapshot() {
 
   _cacheSet(normalised)
   document.body.classList.add("instant-hydrate")
-  updateResultsTable(prepareDisplayResults(normalised))
+  updateResultsTable(prepareDisplayResults(normalised), { force: true, animate: false })
   requestAnimationFrame(() => requestAnimationFrame(() => {
     document.body.classList.remove("instant-hydrate")
   }))
@@ -613,7 +616,11 @@ async function init() {
   const hydrated = hydrateCollectionSnapshot()
 
   // Start the real collection request immediately; cached cards remain visible while it refreshes.
-  const initialCollectionLoad = searchMedia({ forceRefresh: true, showSkeleton: !hydrated })
+  const initialCollectionLoad = searchMedia({
+    forceRefresh: true,
+    showSkeleton: !hydrated,
+    animate: false,
+  })
   void sessionVerification
 
   // Bind controls immediately instead of waiting for the backend response.
@@ -993,6 +1000,7 @@ function bindSortControls() {
 async function searchMedia(options = {}) {
   const forceRefresh = Boolean(options?.forceRefresh)
   const showSkeleton = options?.showSkeleton !== false
+  const animate = options?.animate !== false
   const rawSearchQuery = searchInput.value.trim()
   const searchBy       = searchBySelect.value
   const filterType     = filterTypeSelect.value
@@ -1023,7 +1031,7 @@ async function searchMedia(options = {}) {
     let results = all.filter(mediaMatchesCurrentFilters)
 
     results = prepareDisplayResults(results)
-    updateResultsTable(results)
+    updateResultsTable(results, { animate })
 
   } catch(error) {
     showToast("Error searching media: " + error.message, "error")
@@ -1742,8 +1750,49 @@ function renderCurrentTableRows() {
   resultsBody.appendChild(fragment)
 }
 
-function updateResultsTable(results) {
+function getResultsRenderSignature(results) {
+  // Only fields that can change the visible collection UI belong here.
+  // This lets the fresh network response update currentResults without tearing down
+  // and rebuilding hundreds of identical cards already restored from local storage.
+  return results.map(item => [
+    item.media_type,
+    Number(item.order_number) || 0,
+    item.title || "",
+    item.genre || "",
+    Number(item.release_year) || 0,
+    Number(item.end_year) || 0,
+    Number(item.number_of_seasons) || 0,
+    Number(item.rating) || 0,
+    item.poster_url || "",
+    item.watch_status || "",
+    item.favorite ? 1 : 0,
+    item._actorMatch?.character || "",
+  ].join("")).join("")
+}
+
+function updateResultsTable(results, options = {}) {
   currentResults = results
+  _cardPool = results
+
+  const signature = getResultsRenderSignature(results)
+  const unchanged = !options.force && signature === _lastResultsRenderSignature
+
+  // The snapshot and the server often contain the exact same collection.
+  // Keep the existing DOM in that case so cards do not visibly reload several times.
+  if (unchanged) {
+    if (currentGridMode === "list" && resultsBody && !resultsBody.children.length) {
+      renderCurrentTableRows()
+    }
+    refreshStatusAndStats()
+    const empty = document.getElementById("empty-state")
+    if (empty) {
+      empty.style.display = results.length === 0 ? "flex" : "none"
+      updateEmptyStateCopy(results)
+    }
+    return false
+  }
+
+  _lastResultsRenderSignature = signature
 
   // ── Table rows ──
   // Avoid creating hundreds of hidden rows while Grid View is active.
@@ -1763,7 +1812,7 @@ function updateResultsTable(results) {
   }
 
   // ── Card grid ──
-  updateCardGrid(results)
+  updateCardGrid(results, { animate: options.animate !== false })
 
   // ── Stats ──
   updateStats(results)
@@ -1774,6 +1823,7 @@ function updateResultsTable(results) {
     empty.style.display = results.length === 0 ? "flex" : "none"
     updateEmptyStateCopy(results)
   }
+  return true
 }
 
 function updateEmptyStateCopy(results) {
@@ -1821,6 +1871,7 @@ function updateEmptyStateCopy(results) {
 let _cardPool = []
 let _cardRendered = 0
 let _cardObserver = null
+let _cardRenderGeneration = 0
 const CARD_BATCH = 28
 
 function buildMediaCard(item, index) {
@@ -1879,14 +1930,16 @@ function buildMediaCard(item, index) {
 
   card.addEventListener("click", e => {
     if (e.target.classList.contains("card-chk")) return
-    showDetailModal(item)
+    // Read the latest object from currentResults. The card DOM may be intentionally
+    // preserved when a background refresh returns visually identical data.
+    showDetailModal(currentResults[Number(card.dataset.index)] || item)
   })
   return card
 }
 
-function _renderCardBatch(grid) {
+function _renderCardBatch(grid, batchSize = CARD_BATCH) {
   if (_cardRendered >= _cardPool.length) return
-  const end = Math.min(_cardRendered + CARD_BATCH, _cardPool.length)
+  const end = Math.min(_cardRendered + batchSize, _cardPool.length)
   const frag = document.createDocumentFragment()
   for (let i = _cardRendered; i < end; i++) {
     frag.appendChild(buildMediaCard(_cardPool[i], i))
@@ -1903,19 +1956,30 @@ function _renderCardBatch(grid) {
   }
 }
 
-function updateCardGrid(results) {
+function getInitialCardBatchSize(grid) {
+  // Render enough rows in one paint to move the infinite-scroll sentinel well below
+  // the viewport. This prevents the observer from firing 4–5 times during startup.
+  const width = Math.max(grid.clientWidth || window.innerWidth || 0, 320)
+  const columns = Math.max(1, Math.floor(width / 185))
+  const visibleRows = Math.max(3, Math.ceil((window.innerHeight || 800) / 310) + 3)
+  return Math.min(84, Math.max(36, columns * visibleRows))
+}
+
+function updateCardGrid(results, options = {}) {
   const grid = document.getElementById("card-grid")
   if (!grid) return
   // Teardown old observer
   _cardObserver?.disconnect()
   _cardObserver = null
+  const renderGeneration = ++_cardRenderGeneration
   grid.classList.remove("is-reordering")
+  grid.classList.toggle("no-card-entry-animation", options.animate === false)
   grid.innerHTML = ""
   _cardPool = results
   _cardRendered = 0
 
-  // First batch — immediate
-  _renderCardBatch(grid)
+  // First paint includes the visible area plus a generous buffer.
+  _renderCardBatch(grid, getInitialCardBatchSize(grid))
 
   // Sentinel for infinite scroll
   if (_cardRendered < _cardPool.length) {
@@ -1924,17 +1988,35 @@ function updateCardGrid(results) {
     sentinel.style.cssText = "height:1px;grid-column:1/-1;pointer-events:none;"
     grid.appendChild(sentinel)
 
+    let batchScheduled = false
     _cardObserver = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) _renderCardBatch(grid)
-    }, { rootMargin: "300px" })
+      if (!entries[0].isIntersecting || batchScheduled) return
+      batchScheduled = true
+      const renderNext = () => {
+        batchScheduled = false
+        if (renderGeneration !== _cardRenderGeneration) return
+        _renderCardBatch(grid)
+      }
+      if ("requestIdleCallback" in window) {
+        window.requestIdleCallback(renderNext, { timeout: 180 })
+      } else {
+        window.setTimeout(renderNext, 40)
+      }
+    }, { rootMargin: "180px 0px" })
     _cardObserver.observe(sentinel)
   }
 
-  // A subtle staggered "reel shuffle" makes sorting in Grid View feel intentional.
-  requestAnimationFrame(() => {
-    grid.classList.add("is-reordering")
-    window.setTimeout(() => grid.classList.remove("is-reordering"), 720)
-  })
+  // Animate deliberate user-driven sorting/searching, never the initial hydration.
+  if (options.animate === false) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      grid.classList.remove("no-card-entry-animation")
+    }))
+  } else {
+    requestAnimationFrame(() => {
+      grid.classList.add("is-reordering")
+      window.setTimeout(() => grid.classList.remove("is-reordering"), 720)
+    })
+  }
 }
 
 function toggleCardSelection(checkbox, index) {
@@ -1999,8 +2081,14 @@ function showDetailModal(item) {
   const overlay = document.getElementById("detail-modal")
   if (!overlay) return
   const detailSerial = ++detailRequestSerial
-
-  const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0
+  const readOnlySharedTitle = Boolean(item.__shared_read_only)
+  const hasRatingValue = item.rating !== null && item.rating !== undefined && item.rating !== ""
+  // Personal vault titles always show their local rating. Shared titles only show it
+  // when the owner allowed the rating value to be included in the shared payload.
+  const hasSharedRating = !readOnlySharedTitle || hasRatingValue
+  const rating = hasRatingValue
+    ? (typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0)
+    : 0
 
   // Poster
   const poster   = document.getElementById("detail-poster")
@@ -2047,9 +2135,13 @@ function showDetailModal(item) {
     : `<div class="det-shared-readonly"><i class="fas fa-eye-slash"></i> Rating kept private</div>`
 
   // Genre tags
-  const genres = item.genre.split(",").map(g => g.trim())
-  document.getElementById("detail-genre-tags").innerHTML =
-    genres.map(g => `<span class="genre-tag">${escapeHtml(g)}</span>`).join("")
+  const genres = String(item.genre || "")
+    .split(",")
+    .map(g => g.trim())
+    .filter(Boolean)
+  document.getElementById("detail-genre-tags").innerHTML = genres.length
+    ? genres.map(g => `<span class="genre-tag">${escapeHtml(g)}</span>`).join("")
+    : `<span class="genre-tag">Genre unavailable</span>`
 
   // Clear extra info area
   const extraEl = document.getElementById("detail-extra")
@@ -2059,7 +2151,6 @@ function showDetailModal(item) {
 
   // Edit button is hidden for titles opened from a friend's read-only vault.
   const detailEditButton = document.getElementById("detail-edit-btn")
-  const readOnlySharedTitle = Boolean(item.__shared_read_only)
   if (detailEditButton) {
     detailEditButton.style.display = readOnlySharedTitle ? "none" : "inline-flex"
     detailEditButton.onclick = readOnlySharedTitle ? null : () => {
