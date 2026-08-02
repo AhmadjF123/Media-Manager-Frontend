@@ -5515,3 +5515,34 @@ body.light-theme .sharing-note { color: #397f3d; }
 .actor-profile-portrait-ph[hidden] {
   display: none !important;
 }
+
+
+/* Manual poster upload */
+.manual-poster-controls {
+  display: flex;
+  gap: .65rem;
+  width: 100%;
+  margin-top: .8rem;
+}
+.poster-file-input { display: none !important; }
+.manual-poster-btn {
+  flex: 1;
+  min-height: 42px;
+  border: 1px solid color-mix(in srgb, var(--gold) 42%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--gold) 10%, var(--surface));
+  color: var(--text-primary);
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .45rem;
+  transition: transform .18s ease, border-color .18s ease, background .18s ease;
+}
+.manual-poster-btn:hover { transform: translateY(-1px); border-color: var(--gold); background: color-mix(in srgb, var(--gold) 17%, var(--surface)); }
+.manual-poster-btn--danger { flex: 0 0 auto; padding: 0 .9rem; color: #ff7777; border-color: rgba(255,90,90,.28); background: rgba(255,70,70,.07); }
+.manual-poster-btn--danger:hover { border-color: rgba(255,90,90,.65); background: rgba(255,70,70,.13); }
+.manual-poster-hint { width: 100%; margin: .55rem 0 0; color: var(--text-muted); font-size: .72rem; line-height: 1.45; text-align: center; }
+body.light-theme .manual-poster-btn { background: rgba(219,164,43,.08); }
+@media (max-width: 620px) { .manual-poster-controls { flex-direction: column; } .manual-poster-btn--danger { width: 100%; } }

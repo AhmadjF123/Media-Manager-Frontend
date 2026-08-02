@@ -63,6 +63,9 @@ const mediaTypeSelect   = document.getElementById("media-type")
 const autoFillBtn       = document.getElementById("auto-fill-btn")
 const posterImage       = document.getElementById("poster-image")
 const posterPlaceholder = document.getElementById("poster-placeholder")
+const posterFileInput   = document.getElementById("poster-file-input")
+const choosePosterBtn   = document.getElementById("choose-poster-btn")
+const removePosterBtn   = document.getElementById("remove-poster-btn")
 const editModal         = document.getElementById("edit-modal")
 const closeModalBtn     = document.querySelector(".close")
 const editForm          = document.getElementById("edit-form")
@@ -80,6 +83,9 @@ const editMediaTypeInput = document.getElementById("edit-media-type")
 const editAutoFillBtn   = document.getElementById("edit-auto-fill-btn")
 const editPosterImage   = document.getElementById("edit-poster-image")
 const editPosterPlaceholder = document.getElementById("edit-poster-placeholder")
+const editPosterFileInput = document.getElementById("edit-poster-file-input")
+const editChoosePosterBtn = document.getElementById("edit-choose-poster-btn")
+const editRemovePosterBtn = document.getElementById("edit-remove-poster-btn")
 const toast             = document.getElementById("toast")
 const toastMessage      = document.getElementById("toast-message")
 const toastIcon         = document.getElementById("toast-icon")
@@ -601,6 +607,14 @@ function hydrateCollectionSnapshot() {
   }))
   return true
 }
+
+
+choosePosterBtn?.addEventListener("click", () => posterFileInput?.click())
+posterFileInput?.addEventListener("change", () => handleManualPosterSelection(posterFileInput, posterImage, posterPlaceholder, removePosterBtn))
+removePosterBtn?.addEventListener("click", () => removeManualPoster(posterFileInput, posterImage, posterPlaceholder, removePosterBtn))
+editChoosePosterBtn?.addEventListener("click", () => editPosterFileInput?.click())
+editPosterFileInput?.addEventListener("change", () => handleManualPosterSelection(editPosterFileInput, editPosterImage, editPosterPlaceholder, editRemovePosterBtn))
+editRemovePosterBtn?.addEventListener("click", () => removeManualPoster(editPosterFileInput, editPosterImage, editPosterPlaceholder, editRemovePosterBtn))
 
 async function init() {
   // Apply the saved theme before any network work, so refresh never flashes the opposite theme.
@@ -1880,7 +1894,7 @@ function buildMediaCard(item, index) {
   const rating = typeof item.rating === "number" ? item.rating : parseFloat(item.rating) || 0
   const ratingColor = rating >= 8 ? "#4caf50" : rating >= 6 ? "#d4a843" : "#e53935"
   const displayYear = String(item.release_year || item.display_year || "—")
-  const hasPoster = item.poster_url && item.poster_url.startsWith("http")
+  const hasPoster = isDisplayablePosterSource(item.poster_url)
   const typeLabel = item.media_type === "movie" ? "🎬 Movie" : "📺 Series"
 
   const card = document.createElement("div")
@@ -2097,7 +2111,7 @@ function showDetailModal(item) {
   const posterPh = document.getElementById("detail-poster-ph")
   const bgBlur   = document.getElementById("detail-bg-blur")
 
-  if (item.poster_url && item.poster_url.startsWith("http")) {
+  if (isDisplayablePosterSource(item.poster_url)) {
     poster.src = item.poster_url
     poster.style.display = "block"
     posterPh.style.display = "none"
@@ -2979,6 +2993,76 @@ function toggleGridView(mode) {
 window.toggleGridView = toggleGridView
 
 // ════════════════════════════════════════════════
+
+function isDisplayablePosterSource(value) {
+  const source = String(value || "").trim()
+  return source.startsWith("http://") || source.startsWith("https://") || source.startsWith("data:image/")
+}
+
+function syncPosterPreview(imageEl, placeholderEl, removeButton) {
+  const visible = isDisplayablePosterSource(imageEl?.src)
+  if (imageEl) imageEl.style.display = visible ? "block" : "none"
+  if (placeholderEl) placeholderEl.style.display = visible ? "none" : "flex"
+  if (removeButton) removeButton.hidden = !visible
+}
+
+async function optimizePosterFile(file) {
+  if (!file || !file.type.startsWith("image/")) throw new Error("Please choose a valid image file")
+  if (file.size > 12 * 1024 * 1024) throw new Error("Image must be smaller than 12 MB")
+
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const image = new Image()
+    image.decoding = "async"
+    image.src = objectUrl
+    await image.decode()
+
+    const maxWidth = 900
+    const maxHeight = 1350
+    const ratio = Math.min(1, maxWidth / image.naturalWidth, maxHeight / image.naturalHeight)
+    const width = Math.max(1, Math.round(image.naturalWidth * ratio))
+    const height = Math.max(1, Math.round(image.naturalHeight * ratio))
+    const canvas = document.createElement("canvas")
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext("2d", { alpha: false })
+    ctx.fillStyle = "#0b0b12"
+    ctx.fillRect(0, 0, width, height)
+    ctx.drawImage(image, 0, 0, width, height)
+
+    let quality = 0.86
+    let dataUrl = canvas.toDataURL("image/jpeg", quality)
+    while (dataUrl.length > 900000 && quality > 0.58) {
+      quality -= 0.08
+      dataUrl = canvas.toDataURL("image/jpeg", quality)
+    }
+    if (dataUrl.length > 1200000) throw new Error("Image is still too large after optimization")
+    return dataUrl
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+async function handleManualPosterSelection(fileInput, imageEl, placeholderEl, removeButton) {
+  const file = fileInput?.files?.[0]
+  if (!file) return
+  try {
+    const dataUrl = await optimizePosterFile(file)
+    imageEl.src = dataUrl
+    syncPosterPreview(imageEl, placeholderEl, removeButton)
+    showToast("Custom poster ready — it will be saved with this title", "success")
+  } catch (error) {
+    fileInput.value = ""
+    showToast(error.message || "Could not process this image", "error")
+  }
+}
+
+function removeManualPoster(fileInput, imageEl, placeholderEl, removeButton) {
+  if (fileInput) fileInput.value = ""
+  imageEl.removeAttribute("src")
+  syncPosterPreview(imageEl, placeholderEl, removeButton)
+}
+
 //  ADD MEDIA
 // ════════════════════════════════════════════════
 
@@ -3005,7 +3089,7 @@ async function addMedia(e) {
       title, genre,
       release_year: releaseYear,
       rating,
-      poster_url: posterImage.src && posterImage.src.startsWith("http") ? posterImage.src : null,
+      poster_url: isDisplayablePosterSource(posterImage.src) ? posterImage.src : null,
       // Personal fields (optional)
       notes:         notesInput?.value.trim()        || null,
       watch_status:  watchStatusSelect?.value        || null,
@@ -3059,9 +3143,9 @@ async function addMedia(e) {
 function clearForm(showNotification = true) {
   addForm.reset()
   document.querySelector("#view-add .personal-section")?.classList.remove("personal-section--open")
-  posterImage.src = ""
-  posterImage.style.display = "none"
-  posterPlaceholder.style.display = "flex"
+  posterImage.removeAttribute("src")
+  if (posterFileInput) posterFileInput.value = ""
+  syncPosterPreview(posterImage, posterPlaceholder, removePosterBtn)
   updateEndYearVisibility()
   titleInput.focus()
   // Reset personal fields
@@ -3120,8 +3204,7 @@ async function fetchMediaInfo() {
 
     if (info.poster_url) {
       posterImage.src = info.poster_url
-      posterImage.style.display = "block"
-      posterPlaceholder.style.display = "none"
+      syncPosterPreview(posterImage, posterPlaceholder, removePosterBtn)
     }
 
     showToast(`"${info.title}" info loaded! ✨`, "success")
@@ -3267,12 +3350,10 @@ function openEditModalForItem(mediaItem) {
 
   if (mediaItem.poster_url) {
     editPosterImage.src = mediaItem.poster_url
-    editPosterImage.style.display = "block"
-    editPosterPlaceholder.style.display = "none"
+    syncPosterPreview(editPosterImage, editPosterPlaceholder, editRemovePosterBtn)
   } else {
     editPosterImage.removeAttribute("src")
-    editPosterImage.style.display = "none"
-    editPosterPlaceholder.style.display = "flex"
+    syncPosterPreview(editPosterImage, editPosterPlaceholder, editRemovePosterBtn)
   }
 
   if (editWatchStatusSelect) editWatchStatusSelect.value = mediaItem.watch_status || ""
@@ -3352,8 +3433,7 @@ async function fetchEditInfo() {
 
     if (info.poster_url) {
       editPosterImage.src = info.poster_url
-      editPosterImage.style.display = "block"
-      editPosterPlaceholder.style.display = "none"
+      syncPosterPreview(editPosterImage, editPosterPlaceholder, editRemovePosterBtn)
     }
 
     showToast(`Info loaded for "${info.title}"!`, "success")
@@ -4474,7 +4554,7 @@ function getFilteredSharedItems() {
 function buildSharedMediaCard(item) {
   const card = document.createElement("article")
   card.className = "shared-media-card"
-  const hasPoster = item.poster_url && item.poster_url.startsWith("http")
+  const hasPoster = isDisplayablePosterSource(item.poster_url)
   const rating = item.rating === null ? "Private" : `★ ${Number(item.rating || 0).toFixed(1)}`
   card.innerHTML = `
     <div class="shared-media-poster">

@@ -590,6 +590,16 @@
               class="poster-img"
               style="display: none"
             />
+            <div class="manual-poster-controls">
+              <input id="poster-file-input" class="poster-file-input" type="file" accept="image/jpeg,image/png,image/webp" />
+              <button type="button" id="choose-poster-btn" class="manual-poster-btn">
+                <i class="fas fa-upload"></i><span>Choose Image</span>
+              </button>
+              <button type="button" id="remove-poster-btn" class="manual-poster-btn manual-poster-btn--danger" hidden>
+                <i class="fas fa-trash"></i><span>Remove</span>
+              </button>
+            </div>
+            <p class="manual-poster-hint">Upload JPG, PNG or WebP. The image is optimized automatically.</p>
           </div>
         </div>
       </section>
@@ -1043,6 +1053,16 @@
               class="poster-img"
               style="display: none"
             />
+            <div class="manual-poster-controls">
+              <input id="edit-poster-file-input" class="poster-file-input" type="file" accept="image/jpeg,image/png,image/webp" />
+              <button type="button" id="edit-choose-poster-btn" class="manual-poster-btn">
+                <i class="fas fa-upload"></i><span>Change Image</span>
+              </button>
+              <button type="button" id="edit-remove-poster-btn" class="manual-poster-btn manual-poster-btn--danger" hidden>
+                <i class="fas fa-trash"></i><span>Remove</span>
+              </button>
+            </div>
+            <p class="manual-poster-hint">Your uploaded image overrides Auto-Fill.</p>
           </div>
         </div>
       </div>
