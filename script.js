@@ -133,9 +133,11 @@ const actorProfileState = {
   visibleLimit: 24,
   vaultFilter: "all",
   requestSerial: 0,
+  imageRequestSerial: 0,
   vaultLookup: null,
 }
 const _actorProfileCache = new Map()
+const _actorProfilePathHints = new Map()
 
 // ── Sorting state ──
 const SORT_STORAGE_KEY = "cinema_sort_preference"
@@ -2222,7 +2224,12 @@ function showDetailModal(item) {
     const overview = tmdb.overview || ""
 
     // Top cast (max 4)
-    const cast = (tmdb.credits?.cast || []).slice(0, 6)
+    const castMembers = (tmdb.credits?.cast || []).slice(0, 6)
+    castMembers.forEach(c => {
+      const personId = Number(c?.id || 0)
+      if (personId > 0 && c?.profile_path) _actorProfilePathHints.set(personId, c.profile_path)
+    })
+    const cast = castMembers
       .map(c => `
         <button type="button" class="cast-chip" onclick="openActorProfile(${Number(c.id)})"
           aria-label="Open ${escapeHtml(c.name)} profile" title="${escapeHtml(c.character ? `${c.name} as ${c.character}` : `View ${c.name} profile`)}">
@@ -2294,15 +2301,19 @@ async function fetchActorProfile(personId) {
   if (_actorProfileCache.has(id)) return _actorProfileCache.get(id)
 
   const response = await fetch(
-    `${TMDB_BASE_URL}/person/${id}?api_key=${TMDB_API_KEY}&language=en-US&append_to_response=combined_credits,external_ids`
+    `${TMDB_BASE_URL}/person/${id}?api_key=${TMDB_API_KEY}&language=en-US&append_to_response=combined_credits,external_ids,images`
   )
   if (!response.ok) throw new Error("Could not load this performer right now")
   const person = await response.json()
+  if (!person.profile_path && _actorProfilePathHints.has(id)) {
+    person.profile_path = _actorProfilePathHints.get(id)
+  }
   _actorProfileCache.set(id, person)
   return person
 }
 
 function renderActorProfileLoading() {
+  actorProfileState.imageRequestSerial += 1
   getActorProfileElement("actor-profile-bg").style.backgroundImage = ""
   const portrait = getActorProfileElement("actor-profile-portrait")
   const portraitPh = getActorProfileElement("actor-profile-portrait-ph")
@@ -2449,6 +2460,102 @@ function getActorSocialLinks(person) {
   return links
 }
 
+function getActorProfileImageCandidates(person) {
+  const profiles = Array.isArray(person?.images?.profiles)
+    ? [...person.images.profiles].sort((a, b) =>
+        Number(b.vote_count || 0) - Number(a.vote_count || 0)
+        || Number(b.vote_average || 0) - Number(a.vote_average || 0)
+        || Number(b.width || 0) - Number(a.width || 0))
+    : []
+
+  const hintedPath = _actorProfilePathHints.get(Number(person?.id)) || ""
+  const paths = [person?.profile_path, hintedPath, ...profiles.map(image => image?.file_path)]
+    .filter(Boolean)
+  const uniquePaths = [...new Set(paths)]
+  const urls = []
+
+  uniquePaths.forEach(path => {
+    urls.push(`https://image.tmdb.org/t/p/w500${path}`)
+    urls.push(`https://image.tmdb.org/t/p/original${path}`)
+  })
+
+  return [...new Set(urls)]
+}
+
+function loadActorProfilePortrait(person) {
+  const portrait = getActorProfileElement("actor-profile-portrait")
+  const portraitPh = getActorProfileElement("actor-profile-portrait-ph")
+  const backdrop = getActorProfileElement("actor-profile-bg")
+  if (!portrait || !portraitPh || !backdrop) return
+
+  const requestSerial = ++actorProfileState.imageRequestSerial
+  const personId = Number(person?.id || 0)
+  const candidates = getActorProfileImageCandidates(person)
+
+  portrait.classList.remove("is-loaded")
+  portrait.hidden = true
+  portrait.removeAttribute("src")
+  portrait.alt = person?.name || "Performer"
+  portraitPh.hidden = false
+  portraitPh.innerHTML = candidates.length
+    ? `<i class="fas fa-circle-notch fa-spin"></i>`
+    : `<i class="fas fa-user"></i>`
+  backdrop.style.backgroundImage = ""
+
+  if (!candidates.length) return
+
+  const isCurrent = () =>
+    requestSerial === actorProfileState.imageRequestSerial
+    && Number(actorProfileState.person?.id || 0) === personId
+    && isActorProfileOpen()
+
+  const tryCandidate = index => {
+    if (!isCurrent()) return
+    if (index >= candidates.length) {
+      portrait.hidden = true
+      portrait.classList.remove("is-loaded")
+      portraitPh.hidden = false
+      portraitPh.innerHTML = `<i class="fas fa-user"></i>`
+      backdrop.style.backgroundImage = ""
+      return
+    }
+
+    const url = candidates[index]
+    const probe = new Image()
+    let finished = false
+    const finish = success => {
+      if (finished) return
+      finished = true
+      clearTimeout(timeoutId)
+      probe.onload = null
+      probe.onerror = null
+      if (!isCurrent()) return
+
+      if (!success || !probe.naturalWidth) {
+        tryCandidate(index + 1)
+        return
+      }
+
+      portrait.src = url
+      portrait.hidden = false
+      requestAnimationFrame(() => {
+        if (!isCurrent()) return
+        portrait.classList.add("is-loaded")
+        portraitPh.hidden = true
+        backdrop.style.backgroundImage = `url("${url}")`
+      })
+    }
+
+    const timeoutId = setTimeout(() => finish(false), 8000)
+    probe.onload = () => finish(true)
+    probe.onerror = () => finish(false)
+    probe.decoding = "async"
+    probe.src = url
+  }
+
+  tryCandidate(0)
+}
+
 function renderActorProfile(person) {
   actorProfileState.person = person
   actorProfileState.credits = normaliseActorCredits(person)
@@ -2457,21 +2564,7 @@ function renderActorProfile(person) {
   actorProfileState.visibleLimit = 24
   actorProfileState.vaultLookup = buildActorVaultLookup()
 
-  const portrait = getActorProfileElement("actor-profile-portrait")
-  const portraitPh = getActorProfileElement("actor-profile-portrait-ph")
-  const profileUrl = person.profile_path ? `${TMDB_IMAGE_URL}${person.profile_path}` : ""
-  if (profileUrl) {
-    portrait.src = profileUrl
-    portrait.alt = person.name || "Performer"
-    portrait.hidden = false
-    portraitPh.hidden = true
-    getActorProfileElement("actor-profile-bg").style.backgroundImage = `url(${profileUrl})`
-  } else {
-    portrait.hidden = true
-    portraitPh.hidden = false
-    portraitPh.innerHTML = `<i class="fas fa-user"></i>`
-    getActorProfileElement("actor-profile-bg").style.backgroundImage = ""
-  }
+  loadActorProfilePortrait(person)
 
   getActorProfileElement("actor-profile-name").textContent = person.name || "Performer"
   getActorProfileElement("actor-profile-department").textContent = person.known_for_department || "Acting"

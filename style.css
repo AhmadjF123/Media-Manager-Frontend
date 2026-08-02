@@ -5484,3 +5484,34 @@ body.light-theme .sharing-note { color: #397f3d; }
   .sharing-overlay { padding: 0; }
   .sharing-box { width: 100%; max-height: 100vh; min-height: 100vh; border: 0; border-radius: 0; padding: 62px 18px 24px; }
 }
+
+/* Performer portrait: keep the loader and image in one layer and always
+   respect the hidden attribute. This prevents the loading tile from sitting
+   on top of a successfully loaded TMDB portrait. */
+.actor-profile-portrait-wrap {
+  position: relative;
+  isolation: isolate;
+}
+.actor-profile-portrait,
+.actor-profile-portrait-ph {
+  position: absolute;
+  inset: 0;
+}
+.actor-profile-portrait {
+  z-index: 2;
+  display: block;
+  opacity: 0;
+  transform: scale(1.015);
+  transition: opacity .24s ease, transform .32s ease;
+}
+.actor-profile-portrait.is-loaded {
+  opacity: 1;
+  transform: scale(1);
+}
+.actor-profile-portrait-ph {
+  z-index: 1;
+}
+.actor-profile-portrait[hidden],
+.actor-profile-portrait-ph[hidden] {
+  display: none !important;
+}
