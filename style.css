@@ -5546,3 +5546,148 @@ body.light-theme .sharing-note { color: #397f3d; }
 .manual-poster-hint { width: 100%; margin: .55rem 0 0; color: var(--text-muted); font-size: .72rem; line-height: 1.45; text-align: center; }
 body.light-theme .manual-poster-btn { background: rgba(219,164,43,.08); }
 @media (max-width: 620px) { .manual-poster-controls { flex-direction: column; } .manual-poster-btn--danger { width: 100%; } }
+
+/* ══════════════════════════════════════════════════
+   NUMBER INPUTS — remove native browser stepper arrows everywhere
+   ══════════════════════════════════════════════════ */
+input[type="number"] {
+  appearance: textfield;
+  -webkit-appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
+/* ══════════════════════════════════════════════════
+   EDIT MODAL — compact Personal Notes to match the rest of the form
+   ══════════════════════════════════════════════════ */
+#edit-modal .personal-section {
+  margin-top: 2px;
+  border-radius: 14px;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.1);
+}
+
+#edit-modal .personal-section-hdr {
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+#edit-modal .personal-section-title-wrap {
+  gap: 11px;
+}
+
+#edit-modal .personal-section-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  font-size: 0.82rem;
+  box-shadow: 0 7px 14px rgba(212,168,67,0.18);
+}
+
+#edit-modal .personal-section-title-group {
+  gap: 7px;
+}
+
+#edit-modal .personal-section-title {
+  font-size: 0.82rem;
+  letter-spacing: 0.01em;
+}
+
+#edit-modal .personal-section-hdr em {
+  font-size: 0.76rem;
+}
+
+#edit-modal .ps-arrow {
+  font-size: 0.78rem;
+}
+
+#edit-modal .personal-section-body {
+  padding: 12px 16px 16px;
+}
+
+#edit-modal .personal-grid {
+  gap: 14px 16px;
+}
+
+#edit-modal .personal-field label {
+  margin-bottom: 7px;
+  font-size: 0.74rem;
+  letter-spacing: 1.35px;
+}
+
+#edit-modal .personal-input,
+#edit-modal .personal-select {
+  min-height: 46px;
+  padding: 0 14px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+}
+
+#edit-modal .personal-select {
+  padding-right: 44px;
+}
+
+#edit-modal .select-shell-icon {
+  right: 15px;
+  font-size: 0.82rem;
+}
+
+#edit-modal .date-input-wrap {
+  min-height: 46px;
+  padding-right: 52px;
+  border-radius: 12px;
+}
+
+#edit-modal .personal-date-input {
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 0.9rem;
+}
+
+#edit-modal .date-picker-btn {
+  right: 6px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  font-size: 0.82rem;
+}
+
+#edit-modal .fav-toggle--wide {
+  min-height: 46px;
+  padding: 5px 9px;
+  gap: 10px;
+  border-radius: 12px;
+}
+
+#edit-modal .fav-toggle-track {
+  width: 58px;
+  height: 34px;
+  border-radius: 10px;
+  font-size: 0.82rem;
+}
+
+#edit-modal .fav-label-text {
+  font-size: 0.78rem;
+  letter-spacing: 0.025em;
+}
+
+#edit-modal .notes-ta {
+  min-height: 108px;
+  padding: 13px 14px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 860px) {
+  #edit-modal .personal-section-hdr,
+  #edit-modal .personal-section-body {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
