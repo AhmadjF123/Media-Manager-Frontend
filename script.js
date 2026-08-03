@@ -4068,6 +4068,11 @@ const socialState = {
   searchTimer: null,
   searchSerial: 0,
   permissionFriend: null,
+  permissionMode: "friend",
+  permissionScope: "filters",
+  permissionSelected: new Set(),
+  permissionMediaFilter: "all",
+  permissionAudience: new Set(),
   sharedOwner: null,
   sharedItems: [],
   sharedPermissions: null,
@@ -4083,6 +4088,11 @@ function resetSocialState() {
   socialState.blocked = []
   socialState.searchResults = []
   socialState.permissionFriend = null
+  socialState.permissionMode = "friend"
+  socialState.permissionScope = "filters"
+  socialState.permissionSelected = new Set()
+  socialState.permissionMediaFilter = "all"
+  socialState.permissionAudience = new Set()
   socialState.sharedOwner = null
   socialState.sharedItems = []
   socialState.sharedPermissions = null
@@ -4167,6 +4177,22 @@ function initSocialUI() {
     })
   })
   document.getElementById("friend-vault-search")?.addEventListener("input", renderSharedVault)
+
+  document.querySelectorAll('input[name="sharing-scope"]').forEach(input => {
+    input.addEventListener("change", () => {
+      if (!input.checked) return
+      socialState.permissionScope = input.value
+      syncSharingScopeUI()
+    })
+  })
+  document.getElementById("sharing-title-search")?.addEventListener("input", renderSharingTitlePicker)
+  document.querySelectorAll("[data-sharing-media-filter]").forEach(button => {
+    button.addEventListener("click", () => {
+      socialState.permissionMediaFilter = button.dataset.sharingMediaFilter || "all"
+      document.querySelectorAll("[data-sharing-media-filter]").forEach(item => item.classList.toggle("active", item === button))
+      renderSharingTitlePicker()
+    })
+  })
 
   const sharingOverlay = document.getElementById("sharing-modal")
   sharingOverlay?.addEventListener("click", event => {
@@ -4367,13 +4393,33 @@ async function loadSocialFriends(force = false) {
 }
 window.loadSocialFriends = loadSocialFriends
 
+function normaliseSharingPermissions(permission = {}) {
+  const validScopes = new Set(["filters", "all", "selected", "all_except", "none"])
+  const scope = validScopes.has(permission.scope)
+    ? permission.scope
+    : (permission.full_collection ? "all" : "filters")
+  return {
+    watching: Boolean(permission.watching),
+    watched: Boolean(permission.watched),
+    favorites: Boolean(permission.favorites),
+    ratings: permission.ratings !== false,
+    full_collection: scope === "all",
+    scope,
+    selected_items: Array.isArray(permission.selected_items) ? permission.selected_items.map(String) : [],
+  }
+}
+
 function sharingSummary(permission = {}) {
-  if (permission.full_collection) return ["Full collection", permission.ratings ? "Ratings" : "Ratings private"]
+  const normalized = normaliseSharingPermissions(permission)
+  if (normalized.scope === "all") return ["All titles", normalized.ratings ? "Ratings shown" : "Ratings private"]
+  if (normalized.scope === "selected") return [`${normalized.selected_items.length} selected`, normalized.ratings ? "Ratings shown" : "Ratings private"]
+  if (normalized.scope === "all_except") return [`All except ${normalized.selected_items.length}`, normalized.ratings ? "Ratings shown" : "Ratings private"]
+  if (normalized.scope === "none") return ["Nothing shared"]
   const labels = []
-  if (permission.watching) labels.push("Watching")
-  if (permission.watched) labels.push("Watched")
-  if (permission.favorites) labels.push("Favorites")
-  if (permission.ratings) labels.push("Ratings")
+  if (normalized.watching) labels.push("Watching")
+  if (normalized.watched) labels.push("Watched")
+  if (normalized.favorites) labels.push("Favorites")
+  if (normalized.ratings) labels.push("Ratings")
   return labels.length ? labels : ["Nothing shared"]
 }
 
@@ -4442,53 +4488,256 @@ async function loadBlockedUsers() {
   }
 }
 
+function sharingMediaToken(item = {}) {
+  const type = item.media_type === "series" ? "series" : "movie"
+  const rawId = item._id || item.id
+  if (rawId) return `${type}:${rawId}`
+  return `${type}:order:${Number(item.order_number) || 0}`
+}
+
+function getSharingCatalog() {
+  const source = Array.isArray(_cache.data) && _cache.data.length
+    ? _cache.data
+    : (readCollectionSnapshot() || currentResults || [])
+  const map = new Map()
+  source.forEach(raw => {
+    const item = normaliseMediaItem(raw)
+    const token = sharingMediaToken(item)
+    if (!map.has(token)) map.set(token, item)
+  })
+  return [...map.values()].sort((a, b) => titleCollator.compare(a.title || "", b.title || ""))
+}
+
+function updateSharingSelectedSummary() {
+  const count = socialState.permissionSelected.size
+  const summary = document.getElementById("sharing-selected-summary")
+  if (!summary) return
+  if (socialState.permissionScope === "selected") summary.textContent = `${count} visible title${count === 1 ? "" : "s"}`
+  else if (socialState.permissionScope === "all_except") summary.textContent = `${count} hidden title${count === 1 ? "" : "s"}`
+  else summary.textContent = socialState.permissionScope === "all" ? "Entire collection" : socialState.permissionScope === "none" ? "No titles" : "Automatic"
+}
+
+function syncSharingScopeUI() {
+  document.querySelectorAll('input[name="sharing-scope"]').forEach(input => {
+    input.checked = input.value === socialState.permissionScope
+    input.closest(".sharing-scope-card")?.classList.toggle("active", input.checked)
+  })
+  const isFilters = socialState.permissionScope === "filters"
+  const usesPicker = socialState.permissionScope === "selected" || socialState.permissionScope === "all_except"
+  const filterOptions = document.getElementById("sharing-filter-options")
+  const picker = document.getElementById("sharing-title-picker")
+  if (filterOptions) filterOptions.hidden = !isFilters
+  if (picker) picker.hidden = !usesPicker
+  const pickerKicker = document.getElementById("sharing-picker-kicker")
+  const pickerTitle = document.getElementById("sharing-picker-title")
+  if (pickerKicker) pickerKicker.textContent = socialState.permissionScope === "all_except" ? "Private exceptions" : "Manual selection"
+  if (pickerTitle) pickerTitle.textContent = socialState.permissionScope === "all_except" ? "Choose titles to hide" : "Choose visible titles"
+  updateSharingSelectedSummary()
+  if (usesPicker) renderSharingTitlePicker()
+}
+
+function renderSharingTitlePicker() {
+  const grid = document.getElementById("sharing-title-grid")
+  const empty = document.getElementById("sharing-title-empty")
+  if (!grid) return
+  const query = String(document.getElementById("sharing-title-search")?.value || "").trim().toLowerCase()
+  const mediaFilter = socialState.permissionMediaFilter || "all"
+  const catalog = getSharingCatalog()
+  const visible = catalog.filter(item => {
+    const token = sharingMediaToken(item)
+    if (mediaFilter === "selected" && !socialState.permissionSelected.has(token)) return false
+    if (mediaFilter === "movie" && item.media_type !== "movie") return false
+    if (mediaFilter === "series" && item.media_type !== "series") return false
+    if (query && !`${item.title || ""} ${item.release_year || ""} ${item.genre || ""}`.toLowerCase().includes(query)) return false
+    return true
+  })
+  grid.innerHTML = visible.map(item => {
+    const token = sharingMediaToken(item)
+    const selected = socialState.permissionSelected.has(token)
+    const poster = item.poster_url
+      ? `<img src="${escapeHtml(item.poster_url)}" alt="" loading="lazy">`
+      : `<span class="sharing-title-placeholder"><i class="fas fa-${item.media_type === "series" ? "tv" : "film"}"></i></span>`
+    return `<button type="button" class="sharing-title-card${selected ? " selected" : ""}" data-sharing-token="${escapeHtml(token)}" onclick="toggleSharingTitle('${escapeHtml(token)}')" aria-pressed="${selected}">
+      <span class="sharing-title-poster">${poster}<i class="fas fa-check"></i></span>
+      <span class="sharing-title-copy"><b>${escapeHtml(item.title || "Untitled")}</b><small>${escapeHtml(String(item.release_year || "—"))} · ${item.media_type === "series" ? "Series" : "Movie"}</small></span>
+    </button>`
+  }).join("")
+  if (empty) empty.hidden = visible.length > 0
+  updateSharingSelectedSummary()
+}
+
+function toggleSharingTitle(token) {
+  if (socialState.permissionSelected.has(token)) socialState.permissionSelected.delete(token)
+  else socialState.permissionSelected.add(token)
+  renderSharingTitlePicker()
+}
+window.toggleSharingTitle = toggleSharingTitle
+
+function selectAllSharingTitles() {
+  const query = String(document.getElementById("sharing-title-search")?.value || "").trim().toLowerCase()
+  const mediaFilter = socialState.permissionMediaFilter || "all"
+  if (mediaFilter === "selected") return
+  getSharingCatalog().forEach(item => {
+    if (mediaFilter === "movie" && item.media_type !== "movie") return
+    if (mediaFilter === "series" && item.media_type !== "series") return
+    if (query && !`${item.title || ""} ${item.release_year || ""} ${item.genre || ""}`.toLowerCase().includes(query)) return
+    socialState.permissionSelected.add(sharingMediaToken(item))
+  })
+  renderSharingTitlePicker()
+}
+window.selectAllSharingTitles = selectAllSharingTitles
+
+function clearSharingTitles() {
+  socialState.permissionSelected.clear()
+  renderSharingTitlePicker()
+}
+window.clearSharingTitles = clearSharingTitles
+
+function renderSharingAudience(currentUsername = "") {
+  const container = document.getElementById("sharing-audience-list")
+  if (!container) return
+  if (socialState.permissionMode === "global") {
+    container.innerHTML = ""
+    return
+  }
+  container.innerHTML = socialState.friends.map(friend => {
+    const mandatory = friend.username === currentUsername
+    const checked = mandatory || socialState.permissionAudience.has(friend.username)
+    return `<label class="sharing-audience-chip${checked ? " selected" : ""}">
+      <input type="checkbox" value="${escapeHtml(friend.username)}" ${checked ? "checked" : ""} ${mandatory ? "disabled" : ""} onchange="toggleSharingAudience('${escapeHtml(friend.username)}', this.checked)">
+      <span>${escapeHtml(friend.username.charAt(0).toUpperCase())}</span><b>@${escapeHtml(friend.username)}</b>${mandatory ? "<small>Current</small>" : ""}
+    </label>`
+  }).join("")
+}
+
+function toggleSharingAudience(username, checked) {
+  if (checked) socialState.permissionAudience.add(username)
+  else socialState.permissionAudience.delete(username)
+  renderSharingAudience(socialState.permissionFriend?.username || "")
+}
+window.toggleSharingAudience = toggleSharingAudience
+
+function toggleAllSharingAudience() {
+  const current = socialState.permissionFriend?.username
+  const others = socialState.friends.filter(friend => friend.username !== current)
+  const allSelected = others.every(friend => socialState.permissionAudience.has(friend.username))
+  if (allSelected) socialState.permissionAudience.clear()
+  else others.forEach(friend => socialState.permissionAudience.add(friend.username))
+  renderSharingAudience(current || "")
+}
+window.toggleAllSharingAudience = toggleAllSharingAudience
+
+function fillSharingEditor(permissions, { mode = "friend", user = null } = {}) {
+  const normalized = normaliseSharingPermissions(permissions)
+  socialState.permissionMode = mode
+  socialState.permissionFriend = user
+  socialState.permissionScope = normalized.scope
+  socialState.permissionSelected = new Set(normalized.selected_items)
+  socialState.permissionMediaFilter = "all"
+  socialState.permissionAudience = new Set()
+  document.getElementById("perm-watching").checked = normalized.watching
+  document.getElementById("perm-watched").checked = normalized.watched
+  document.getElementById("perm-favorites").checked = normalized.favorites
+  document.getElementById("perm-ratings").checked = normalized.ratings
+  const search = document.getElementById("sharing-title-search")
+  if (search) search.value = ""
+  document.querySelectorAll("[data-sharing-media-filter]").forEach(button => button.classList.toggle("active", button.dataset.sharingMediaFilter === "all"))
+  const audience = document.getElementById("sharing-audience-section")
+  const globalApply = document.getElementById("sharing-global-apply")
+  if (audience) audience.hidden = mode === "global"
+  if (globalApply) globalApply.hidden = mode !== "global"
+  const applyExisting = document.getElementById("apply-defaults-existing")
+  if (applyExisting) applyExisting.checked = false
+  document.getElementById("sharing-modal-title").textContent = mode === "global" ? "Defaults for all friends" : `Share with @${user.username}`
+  document.getElementById("sharing-modal-subtitle").textContent = mode === "global"
+    ? "Set the starting access for new friends, with an option to apply it to everyone already connected."
+    : "Choose exact cards for this friend, or copy the same access to several friends at once."
+  document.getElementById("save-sharing-btn").innerHTML = mode === "global"
+    ? `<i class="fas fa-check"></i> Save Defaults`
+    : `<i class="fas fa-check"></i> Save Sharing`
+  renderSharingAudience(user?.username || "")
+  syncSharingScopeUI()
+  const modal = document.getElementById("sharing-modal")
+  if (modal) modal.hidden = false
+  document.body.style.overflow = "hidden"
+}
+
 async function openSharingModal(username) {
   try {
+    if (!socialState.friends.length) await loadSocialFriends(true)
     const data = await socialFetch(`/friends/${encodeURIComponent(username)}/permissions`)
-    socialState.permissionFriend = data.user
-    document.getElementById("sharing-modal-title").textContent = `Share with @${data.user.username}`
-    document.getElementById("perm-watching").checked = Boolean(data.permissions.watching)
-    document.getElementById("perm-watched").checked = Boolean(data.permissions.watched)
-    document.getElementById("perm-favorites").checked = Boolean(data.permissions.favorites)
-    document.getElementById("perm-ratings").checked = Boolean(data.permissions.ratings)
-    document.getElementById("perm-full").checked = Boolean(data.permissions.full_collection)
-    const modal = document.getElementById("sharing-modal")
-    if (modal) modal.hidden = false
-    document.body.style.overflow = "hidden"
+    fillSharingEditor(data.permissions, { mode: "friend", user: data.user })
   } catch (error) { showToast(error.message, "error") }
 }
 window.openSharingModal = openSharingModal
+
+async function openGlobalSharingModal() {
+  try {
+    const data = await socialFetch("/sharing/defaults")
+    fillSharingEditor(data.permissions, { mode: "global" })
+  } catch (error) { showToast(error.message, "error") }
+}
+window.openGlobalSharingModal = openGlobalSharingModal
 
 function closeSharingModal() {
   const modal = document.getElementById("sharing-modal")
   if (modal) modal.hidden = true
   if (document.getElementById("detail-modal")?.style.display !== "flex") document.body.style.overflow = ""
   socialState.permissionFriend = null
+  socialState.permissionAudience = new Set()
 }
 window.closeSharingModal = closeSharingModal
 
 async function saveSharingPermissions() {
+  const mode = socialState.permissionMode
   const username = socialState.permissionFriend?.username
-  if (!username) return
+  if (mode !== "global" && !username) return
   const button = document.getElementById("save-sharing-btn")
+  const scope = socialState.permissionScope
+  if (scope === "selected" && !socialState.permissionSelected.size) {
+    showToast("Choose at least one title, or use Nothing", "info")
+    return
+  }
   const permissions = {
     watching: document.getElementById("perm-watching").checked,
     watched: document.getElementById("perm-watched").checked,
     favorites: document.getElementById("perm-favorites").checked,
     ratings: document.getElementById("perm-ratings").checked,
-    full_collection: document.getElementById("perm-full").checked,
+    full_collection: scope === "all",
+    scope,
+    selected_items: (scope === "selected" || scope === "all_except") ? [...socialState.permissionSelected] : [],
   }
   if (button) { button.disabled = true; button.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving…` }
   try {
-    await socialFetch(`/friends/${encodeURIComponent(username)}/permissions`, {
-      method: "PUT",
-      body: JSON.stringify(permissions),
-    })
-    showToast(`Sharing updated for @${username}`, "success")
+    if (mode === "global") {
+      const applyToExisting = Boolean(document.getElementById("apply-defaults-existing")?.checked)
+      await socialFetch("/sharing/defaults", {
+        method: "PUT",
+        body: JSON.stringify({ permissions, apply_to_existing: applyToExisting }),
+      })
+      showToast(applyToExisting ? "Defaults saved and applied to all friends" : "Sharing defaults saved", "success")
+    } else {
+      const usernames = [username, ...socialState.permissionAudience].filter((value, index, array) => array.indexOf(value) === index)
+      if (usernames.length === 1) {
+        await socialFetch(`/friends/${encodeURIComponent(username)}/permissions`, {
+          method: "PUT",
+          body: JSON.stringify(permissions),
+        })
+      } else {
+        await socialFetch("/sharing/bulk", {
+          method: "PUT",
+          body: JSON.stringify({ usernames, permissions }),
+        })
+      }
+      showToast(usernames.length === 1 ? `Sharing updated for @${username}` : `Same access applied to ${usernames.length} friends`, "success")
+    }
     closeSharingModal()
     await loadSocialFriends(true)
   } catch (error) { showToast(error.message, "error") }
-  if (button) { button.disabled = false; button.innerHTML = `<i class="fas fa-check"></i> Save Sharing` }
+  if (button) {
+    button.disabled = false
+    button.innerHTML = mode === "global" ? `<i class="fas fa-check"></i> Save Defaults` : `<i class="fas fa-check"></i> Save Sharing`
+  }
 }
 window.saveSharingPermissions = saveSharingPermissions
 
@@ -4521,9 +4770,7 @@ async function openFriendVault(username) {
     document.getElementById("friend-stat-total").textContent = data.stats?.total || 0
     document.getElementById("friend-stat-movies").textContent = data.stats?.movies || 0
     document.getElementById("friend-stat-series").textContent = data.stats?.series || 0
-    document.getElementById("friend-vault-access").textContent = data.permissions.full_collection
-      ? `@${data.owner.username} shares the full collection with you. Read-only access.`
-      : `Shared categories: ${sharingSummary(data.permissions).join(" • ")}. Read-only access.`
+    document.getElementById("friend-vault-access").textContent = `${sharingSummary(data.permissions).join(" • ")}. Read-only access.`
     renderSharedVault()
   } catch (error) {
     if (grid) grid.innerHTML = `<div class="social-empty"><i class="fas fa-triangle-exclamation"></i><h3>Could not open this vault</h3><p>${escapeHtml(error.message)}</p></div>`

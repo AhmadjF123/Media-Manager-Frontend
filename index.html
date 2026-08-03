@@ -666,8 +666,11 @@
 
             <section class="social-panel" data-social-panel="friends" hidden>
               <div class="social-panel-heading">
-                <div><span>Your circle</span><h2>Friends</h2><p>Open a shared vault or control what you share with each person.</p></div>
-                <button type="button" class="social-refresh-btn" onclick="loadSocialFriends(true)"><i class="fas fa-rotate"></i> Refresh</button>
+                <div><span>Your circle</span><h2>Friends</h2><p>Open a shared vault or control exactly which titles each person can see.</p></div>
+                <div class="social-heading-actions">
+                  <button type="button" class="social-refresh-btn sharing-defaults-btn" onclick="openGlobalSharingModal()"><i class="fas fa-users-gear"></i> Defaults for everyone</button>
+                  <button type="button" class="social-refresh-btn" onclick="loadSocialFriends(true)"><i class="fas fa-rotate"></i> Refresh</button>
+                </div>
               </div>
               <div id="friends-grid" class="friends-grid"></div>
             </section>
@@ -1069,22 +1072,78 @@
     </div>
 
 
-    <!-- ═══════════ SHARING PERMISSIONS MODAL ═══════════ -->
+    <!-- ═══════════ GRANULAR SHARING PERMISSIONS MODAL ═══════════ -->
     <div id="sharing-modal" class="sharing-overlay" hidden>
-      <div class="sharing-box" role="dialog" aria-modal="true" aria-labelledby="sharing-modal-title">
+      <div class="sharing-box sharing-box--wide" role="dialog" aria-modal="true" aria-labelledby="sharing-modal-title">
         <button type="button" class="sharing-close" onclick="closeSharingModal()"><i class="fas fa-times"></i></button>
-        <span class="social-kicker"><i class="fas fa-shield-halved"></i> Per-friend privacy</span>
+        <span class="social-kicker"><i class="fas fa-shield-halved"></i> Precision sharing</span>
         <h2 id="sharing-modal-title">Share with @friend</h2>
-        <p>Choose what this person can see in your vault. Personal notes are always private.</p>
-        <div class="sharing-options">
-          <label><span><i class="fas fa-play"></i><b>Currently watching</b><small>Titles marked Watching</small></span><input id="perm-watching" type="checkbox"><i></i></label>
-          <label><span><i class="fas fa-circle-check"></i><b>Watched titles</b><small>Titles marked Watched</small></span><input id="perm-watched" type="checkbox"><i></i></label>
-          <label><span><i class="fas fa-heart"></i><b>Favorites</b><small>Anything marked Favourite</small></span><input id="perm-favorites" type="checkbox"><i></i></label>
-          <label><span><i class="fas fa-star"></i><b>My ratings</b><small>Show your personal score</small></span><input id="perm-ratings" type="checkbox"><i></i></label>
-          <label class="sharing-full"><span><i class="fas fa-vault"></i><b>Full collection</b><small>Share every saved title regardless of status</small></span><input id="perm-full" type="checkbox"><i></i></label>
-        </div>
+        <p id="sharing-modal-subtitle">Choose exactly what this person can see. Personal notes are always private.</p>
+
+        <section class="sharing-section">
+          <div class="sharing-section-head"><div><span>Access scope</span><h3>What can they see?</h3></div><b id="sharing-selected-summary">0 selected</b></div>
+          <div class="sharing-scope-grid" id="sharing-scope-grid">
+            <label class="sharing-scope-card"><input type="radio" name="sharing-scope" value="all"><span><i class="fas fa-vault"></i><b>Everything</b><small>Every title in your collection, including future additions.</small></span></label>
+            <label class="sharing-scope-card"><input type="radio" name="sharing-scope" value="selected"><span><i class="fas fa-list-check"></i><b>Only selected titles</b><small>Choose one, two, twenty, or any exact set of cards.</small></span></label>
+            <label class="sharing-scope-card"><input type="radio" name="sharing-scope" value="all_except"><span><i class="fas fa-eye-slash"></i><b>Everything except</b><small>Share the whole vault while hiding specific titles.</small></span></label>
+            <label class="sharing-scope-card"><input type="radio" name="sharing-scope" value="filters"><span><i class="fas fa-filter"></i><b>Smart categories</b><small>Share Watching, Watched, or Favorites automatically.</small></span></label>
+            <label class="sharing-scope-card"><input type="radio" name="sharing-scope" value="none"><span><i class="fas fa-lock"></i><b>Nothing</b><small>Keep the connection but show no cards.</small></span></label>
+          </div>
+        </section>
+
+        <section id="sharing-filter-options" class="sharing-section" hidden>
+          <div class="sharing-section-head"><div><span>Automatic rules</span><h3>Smart categories</h3></div></div>
+          <div class="sharing-options sharing-options--compact">
+            <label><span><i class="fas fa-play"></i><b>Currently watching</b><small>Titles marked Watching</small></span><input id="perm-watching" type="checkbox"><i></i></label>
+            <label><span><i class="fas fa-circle-check"></i><b>Watched titles</b><small>Titles marked Watched</small></span><input id="perm-watched" type="checkbox"><i></i></label>
+            <label><span><i class="fas fa-heart"></i><b>Favorites</b><small>Anything marked Favourite</small></span><input id="perm-favorites" type="checkbox"><i></i></label>
+          </div>
+        </section>
+
+        <section id="sharing-title-picker" class="sharing-section sharing-title-picker" hidden>
+          <div class="sharing-section-head">
+            <div><span id="sharing-picker-kicker">Manual selection</span><h3 id="sharing-picker-title">Choose visible titles</h3></div>
+            <div class="sharing-picker-actions">
+              <button type="button" onclick="selectAllSharingTitles()">Select all</button>
+              <button type="button" onclick="clearSharingTitles()">Clear</button>
+            </div>
+          </div>
+          <div class="sharing-picker-toolbar">
+            <label><i class="fas fa-search"></i><input id="sharing-title-search" type="search" placeholder="Search your collection…"></label>
+            <div class="sharing-picker-filters">
+              <button type="button" class="active" data-sharing-media-filter="all">All</button>
+              <button type="button" data-sharing-media-filter="movie">Movies</button>
+              <button type="button" data-sharing-media-filter="series">Series</button>
+              <button type="button" data-sharing-media-filter="selected">Selected</button>
+            </div>
+          </div>
+          <div id="sharing-title-grid" class="sharing-title-grid"></div>
+          <div id="sharing-title-empty" class="sharing-picker-empty" hidden>No matching titles.</div>
+        </section>
+
+        <section class="sharing-section sharing-privacy-row">
+          <div><span>Details</span><h3>Rating visibility</h3><p>Poster, title, year and genre are included with every visible card.</p></div>
+          <label class="sharing-detail-toggle"><span><i class="fas fa-star"></i><b>Show my ratings</b><small>Hide your personal score when disabled.</small></span><input id="perm-ratings" type="checkbox"><i></i></label>
+        </section>
+
+        <section id="sharing-audience-section" class="sharing-section sharing-audience-section">
+          <div class="sharing-section-head">
+            <div><span>Apply to</span><h3>One friend or many</h3></div>
+            <button type="button" class="sharing-mini-btn" onclick="toggleAllSharingAudience()">Toggle everyone</button>
+          </div>
+          <p>Keep the current friend selected, then optionally copy the exact same permissions to other friends.</p>
+          <div id="sharing-audience-list" class="sharing-audience-list"></div>
+        </section>
+
+        <section id="sharing-global-apply" class="sharing-section sharing-global-apply" hidden>
+          <label><input id="apply-defaults-existing" type="checkbox"><span><b>Apply these defaults to all current friends</b><small>Otherwise they become the starting permissions for new friends only.</small></span><i></i></label>
+        </section>
+
         <div class="sharing-note"><i class="fas fa-lock"></i> Notes are never shared. Friends have read-only access and cannot edit or delete your collection.</div>
-        <button type="button" id="save-sharing-btn" class="social-primary-btn sharing-save" onclick="saveSharingPermissions()"><i class="fas fa-check"></i> Save Sharing</button>
+        <div class="sharing-footer">
+          <button type="button" class="social-action-btn" onclick="closeSharingModal()">Cancel</button>
+          <button type="button" id="save-sharing-btn" class="social-primary-btn sharing-save" onclick="saveSharingPermissions()"><i class="fas fa-check"></i> Save Sharing</button>
+        </div>
       </div>
     </div>
 
