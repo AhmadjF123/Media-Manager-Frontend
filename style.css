@@ -7055,3 +7055,57 @@ html[data-theme="light"] body .rec-sort-shell { background: rgba(255,255,255,.72
   .rec-sort-shell { width: 100%; }
   .rec-toolbar-summary { grid-column: auto; }
 }
+
+/* ===== Fix recommendation priority badge geometry =====
+   The legacy badge rule set top + left. Collection-style cards position the
+   badge from bottom + right, so explicitly reset the legacy anchors to prevent
+   the badge from stretching across the poster. */
+.recommendation-card--collection .rec-signal-badge {
+  top: auto !important;
+  left: auto !important;
+  right: 12px !important;
+  bottom: 12px !important;
+  width: auto !important;
+  height: auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: calc(100% - 116px) !important;
+  padding: 8px 11px !important;
+  border-radius: 999px !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0,0,0,.26);
+}
+
+.recommendation-card--collection .rec-signal-badge.is-match {
+  background: rgba(34,29,49,.86);
+  border-color: rgba(255,255,255,.16);
+  color: #fff;
+}
+
+.recommendation-card--collection .rec-signal-badge.is-next {
+  background: linear-gradient(135deg, rgba(242,204,103,.96), rgba(213,164,52,.96));
+  border-color: rgba(255,235,178,.42);
+  color: #181107;
+}
+
+.recommendation-card--collection .rec-signal-badge.is-vault {
+  background: rgba(34,48,94,.9);
+  border-color: rgba(142,163,255,.3);
+  color: #f4f6ff;
+}
+
+@media (max-width: 700px) {
+  .recommendation-card--collection .rec-signal-badge {
+    top: auto !important;
+    left: 12px !important;
+    right: auto !important;
+    bottom: 48px !important;
+    width: auto !important;
+    height: auto !important;
+    max-width: calc(100% - 24px) !important;
+    padding: 7px 10px !important;
+    font-size: .68rem;
+  }
+}
