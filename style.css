@@ -6915,3 +6915,143 @@ html[data-theme="light"] body .recommendation-card--collection .rec-progress-inl
     max-width: calc(100% - 24px);
   }
 }
+
+
+/* ===== For You smart filter + ranking controls ===== */
+.rec-toolbar {
+  position: sticky;
+  top: 12px;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto auto;
+  align-items: end;
+  gap: 18px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(212,168,67,.16);
+  background: rgba(13,14,21,.82);
+  box-shadow: 0 16px 36px rgba(0,0,0,.18);
+  backdrop-filter: blur(22px) saturate(1.15);
+}
+.rec-toolbar-copy,
+.rec-sort-control { display: grid; gap: 7px; }
+.rec-toolbar-label {
+  color: var(--text-muted);
+  font-size: .66rem;
+  font-weight: 800;
+  letter-spacing: .17em;
+  text-transform: uppercase;
+}
+.rec-media-filter {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px;
+  border-radius: 15px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.035);
+}
+.rec-filter-btn {
+  min-height: 38px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: .2s ease;
+}
+.rec-filter-btn i { margin-right: 6px; font-size: .75rem; }
+.rec-filter-btn:hover { color: var(--text); background: rgba(255,255,255,.05); }
+.rec-filter-btn.active {
+  color: #19140a;
+  background: linear-gradient(135deg, #efca69, #d6a12d);
+  box-shadow: 0 7px 18px rgba(212,168,67,.2);
+}
+.rec-sort-shell {
+  position: relative;
+  min-width: 220px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 13px;
+  border-radius: 14px;
+  border: 1px solid rgba(212,168,67,.17);
+  background: rgba(255,255,255,.045);
+  color: var(--gold);
+}
+.rec-sort-shell > i:first-child { font-size: .8rem; }
+.rec-sort-shell select {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  appearance: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.rec-sort-shell select option { color: #161616; background: #fff; }
+.rec-sort-chevron { pointer-events: none; color: var(--text-muted); font-size: .67rem; }
+.rec-toolbar-summary {
+  align-self: center;
+  max-width: 240px;
+  color: var(--text-muted);
+  font-size: .76rem;
+  line-height: 1.45;
+  text-align: right;
+}
+.rec-filter-empty {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 18px 20px;
+  border-radius: 18px;
+  border: 1px dashed rgba(212,168,67,.22);
+  background: rgba(212,168,67,.05);
+  color: var(--text-muted);
+}
+.rec-filter-empty[hidden] { display: none; }
+.rec-filter-empty > i { color: var(--gold); font-size: 1.2rem; }
+.rec-filter-empty div { display: grid; gap: 3px; }
+.rec-filter-empty strong { color: var(--text); font-size: .92rem; }
+.rec-filter-empty span { font-size: .78rem; }
+
+body.light-theme .rec-toolbar,
+html[data-theme="light"] body .rec-toolbar {
+  background: rgba(255,253,249,.88);
+  border-color: rgba(190,145,44,.18);
+  box-shadow: 0 14px 30px rgba(71,55,25,.09);
+}
+body.light-theme .rec-media-filter,
+html[data-theme="light"] body .rec-media-filter { background: rgba(93,72,31,.045); border-color: rgba(93,72,31,.08); }
+body.light-theme .rec-filter-btn:hover,
+html[data-theme="light"] body .rec-filter-btn:hover { background: rgba(93,72,31,.06); }
+body.light-theme .rec-sort-shell,
+html[data-theme="light"] body .rec-sort-shell { background: rgba(255,255,255,.72); border-color: rgba(190,145,44,.2); }
+
+@media (max-width: 900px) {
+  .rec-toolbar { grid-template-columns: 1fr 1fr; align-items: end; }
+  .rec-toolbar-summary { grid-column: 1 / -1; max-width: none; text-align: left; }
+  .rec-sort-shell { min-width: 0; }
+}
+@media (max-width: 620px) {
+  .rec-toolbar {
+    position: static;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 17px;
+  }
+  .rec-media-filter { width: 100%; }
+  .rec-filter-btn { flex: 1; min-width: 0; padding: 0 8px; font-size: .75rem; }
+  .rec-sort-shell { width: 100%; }
+  .rec-toolbar-summary { grid-column: auto; }
+}

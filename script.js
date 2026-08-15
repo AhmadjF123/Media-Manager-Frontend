@@ -162,7 +162,7 @@ let sortState = loadSortState()
 const _cache = { data: null, ts: 0, TTL: 60_000 }   // 60s in-memory cache
 const COLLECTION_SNAPSHOT_PREFIX = "cinema_collection_snapshot_v2"
 const COLLECTION_SNAPSHOT_MAX_AGE = 7 * 24 * 60 * 60 * 1000
-const RECOMMENDATION_SNAPSHOT_PREFIX = "cinema_recommendations_snapshot_v2"
+const RECOMMENDATION_SNAPSHOT_PREFIX = "cinema_recommendations_snapshot_v3"
 const RECOMMENDATION_SNAPSHOT_MAX_AGE = 6 * 60 * 60 * 1000
 const recommendationState = {
   data: null,
@@ -171,6 +171,8 @@ const recommendationState = {
   requestSerial: 0,
   renderSignature: "",
   itemMap: new Map(),
+  mediaFilter: "all",
+  sortMode: "priority",
 }
 
 function _cacheGet()          { return (Date.now() - _cache.ts < _cache.TTL) ? _cache.data : null }
@@ -3083,6 +3085,79 @@ function recommendationPayloadSignature(data) {
   ))
 }
 
+function recommendationConnectionRank(item) {
+  const types = new Set([item.primary_reason_type, ...(Array.isArray(item.reason_types) ? item.reason_types : [])].filter(Boolean))
+  if (types.has("franchise_next")) return 5
+  if (types.has("new_season")) return 4
+  if (types.has("because_watched")) return 3
+  return item.in_vault ? 2 : 1
+}
+
+function recommendationContinueRank(item) {
+  const types = new Set([item.primary_reason_type, ...(Array.isArray(item.reason_types) ? item.reason_types : [])].filter(Boolean))
+  if (types.has("new_season")) return 6
+  if (types.has("franchise_next")) return 5
+  if (item.in_vault && item.vault_watch_status === "watching") return 4
+  if (types.has("because_watched")) return 2
+  return 1
+}
+
+function recommendationDateValue(item) {
+  const direct = Date.parse(String(item.release_date || ""))
+  if (Number.isFinite(direct)) return direct
+  const year = Number(item.release_year) || 0
+  return year ? Date.UTC(year, 0, 1) : 0
+}
+
+function recommendationPriorityValue(item) {
+  return Number(item.__feedScore ?? item.score ?? item.match_score) || 0
+}
+
+function sortRecommendationClientItems(items, mode = recommendationState.sortMode) {
+  const sorted = [...items]
+  sorted.sort((a, b) => {
+    let primary = 0
+    if (mode === "latest") primary = recommendationDateValue(b) - recommendationDateValue(a)
+    else if (mode === "universe") primary = recommendationConnectionRank(b) - recommendationConnectionRank(a)
+    else if (mode === "continue") primary = recommendationContinueRank(b) - recommendationContinueRank(a)
+    else primary = recommendationPriorityValue(b) - recommendationPriorityValue(a)
+    if (primary) return primary
+
+    const scoreDiff = recommendationPriorityValue(b) - recommendationPriorityValue(a)
+    if (scoreDiff) return scoreDiff
+    const dateDiff = recommendationDateValue(b) - recommendationDateValue(a)
+    if (dateDiff) return dateDiff
+    return String(a.title || "").localeCompare(String(b.title || ""))
+  })
+  return sorted
+}
+
+function filterRecommendationClientItems(items) {
+  const mediaFilter = recommendationState.mediaFilter
+  return items.filter(item => {
+    if (!item || shouldHideRecommendationAsAlreadyWatched(item)) return false
+    if (mediaFilter === "movie") return item.media_type === "movie"
+    if (mediaFilter === "series") return item.media_type === "series"
+    return true
+  })
+}
+
+function interleaveRecommendationTypes(items, limit = 18) {
+  if (recommendationState.mediaFilter !== "all") return items.slice(0, limit)
+  const movies = items.filter(item => item.media_type === "movie")
+  const series = items.filter(item => item.media_type === "series")
+  const mixed = []
+  let preferMovie = movies.length >= series.length
+  while ((movies.length || series.length) && mixed.length < limit) {
+    const primary = preferMovie ? movies : series
+    const secondary = preferMovie ? series : movies
+    if (primary.length) mixed.push(primary.shift())
+    if (secondary.length && mixed.length < limit) mixed.push(secondary.shift())
+    preferMovie = !preferMovie
+  }
+  return mixed
+}
+
 function buildTopRecommendationFeed(sections = {}) {
   const bucketMap = new Map()
   const sourceOrder = ["continue_story", "from_vault", "new_releases", "because_you_watched"]
@@ -3096,27 +3171,41 @@ function buildTopRecommendationFeed(sections = {}) {
       const rankBoost = (sourceOrder.length - sectionIndex) * 1000 - itemIndex
       const enriched = { ...item, __feedScore: score + rankBoost, __originSection: sectionKey }
       const existing = bucketMap.get(key)
-      if (!existing || enriched.__feedScore > existing.__feedScore) {
-        bucketMap.set(key, enriched)
-      }
+      if (!existing || enriched.__feedScore > existing.__feedScore) bucketMap.set(key, enriched)
     })
   })
 
-  const all = Array.from(bucketMap.values())
-  const movies = all
-    .filter(item => item.media_type === "movie")
-    .sort((a, b) => (Number(b.__feedScore) || 0) - (Number(a.__feedScore) || 0))
-  const series = all
-    .filter(item => item.media_type === "series")
-    .sort((a, b) => (Number(b.__feedScore) || 0) - (Number(a.__feedScore) || 0))
+  const filtered = filterRecommendationClientItems(Array.from(bucketMap.values()))
+  const sorted = sortRecommendationClientItems(filtered)
+  return interleaveRecommendationTypes(sorted, 18)
+}
 
-  const mixed = []
-  while ((movies.length || series.length) && mixed.length < 18) {
-    if (movies.length) mixed.push(movies.shift())
-    if (series.length && mixed.length < 18) mixed.push(series.shift())
-  }
+function recommendationSortLabel(mode) {
+  if (mode === "universe") return "Same universe first"
+  if (mode === "latest") return "Newest releases first"
+  if (mode === "continue") return "Franchise continuations first"
+  return "Highest priority first"
+}
 
-  return mixed.slice(0, 18)
+function updateRecommendationToolbarSummary(total) {
+  const summary = document.getElementById("rec-toolbar-summary")
+  if (!summary) return
+  const typeLabel = recommendationState.mediaFilter === "movie"
+    ? "movies"
+    : recommendationState.mediaFilter === "series"
+      ? "series"
+      : "movies & series"
+  summary.textContent = `${total} ${typeLabel} · ${recommendationSortLabel(recommendationState.sortMode)}`
+}
+
+function syncRecommendationToolbar() {
+  document.querySelectorAll("[data-rec-filter]").forEach(button => {
+    const active = button.dataset.recFilter === recommendationState.mediaFilter
+    button.classList.toggle("active", active)
+    button.setAttribute("aria-pressed", active ? "true" : "false")
+  })
+  const sortSelect = document.getElementById("rec-sort-mode")
+  if (sortSelect && sortSelect.value !== recommendationState.sortMode) sortSelect.value = recommendationState.sortMode
 }
 
 function setRecommendationsLoading(show) {
@@ -3283,7 +3372,9 @@ function renderRecommendationSection(sectionKey, items = []) {
 
   // Front-end safety net for stale snapshots or an older backend response.
   // A title already completed in the vault must never be rendered as a next watch.
-  const visibleItems = items.filter(item => !shouldHideRecommendationAsAlreadyWatched(item))
+  const visibleItems = sectionKey === "top_picks"
+    ? items
+    : sortRecommendationClientItems(filterRecommendationClientItems(items))
 
   grid.innerHTML = ""
   section.hidden = !visibleItems.length
@@ -3325,6 +3416,7 @@ function renderRecommendations(data, { force = false } = {}) {
   if (updatedEl) updatedEl.textContent = formatRecommendationUpdatedAt(data.generated_at)
 
   const sections = data.sections || {}
+  syncRecommendationToolbar()
   const topFeed = buildTopRecommendationFeed(sections)
   let total = topFeed.length
   renderRecommendationSection("top_picks", topFeed)
@@ -3332,14 +3424,17 @@ function renderRecommendations(data, { force = false } = {}) {
   for (const key of Object.keys(RECOMMENDATION_SECTIONS)) {
     if (key === "top_picks") continue
     const items = Array.isArray(sections[key]) ? sections[key] : []
-    const visibleItems = items.filter(item => !shouldHideRecommendationAsAlreadyWatched(item))
+    const visibleItems = sortRecommendationClientItems(filterRecommendationClientItems(items))
     total += visibleItems.length
     renderRecommendationSection(key, visibleItems)
   }
 
-  if (content) content.hidden = total === 0
+  if (content) content.hidden = false
   const empty = document.getElementById("recommendations-empty")
-  if (empty) empty.hidden = total !== 0
+  if (empty) empty.hidden = true
+  const filterEmpty = document.getElementById("recommendations-filter-empty")
+  if (filterEmpty) filterEmpty.hidden = total !== 0
+  updateRecommendationToolbarSummary(topFeed.length)
 }
 
 function getVaultItemForRecommendation(item) {
@@ -3514,11 +3609,33 @@ async function loadRecommendations({ force = false, background = false } = {}) {
   }
 }
 
+function setRecommendationMediaFilter(filter) {
+  if (!new Set(["all", "movie", "series"]).has(filter)) return
+  recommendationState.mediaFilter = filter
+  if (recommendationState.data) renderRecommendations(recommendationState.data, { force: true })
+  else syncRecommendationToolbar()
+}
+
+function setRecommendationSortMode(mode) {
+  if (!new Set(["priority", "universe", "latest", "continue"]).has(mode)) return
+  recommendationState.sortMode = mode
+  if (recommendationState.data) renderRecommendations(recommendationState.data, { force: true })
+  else syncRecommendationToolbar()
+}
+
 function initRecommendationsUI() {
   document.getElementById("recommendations-refresh-btn")?.addEventListener("click", () => {
     void loadRecommendations({ force: true })
   })
   document.getElementById("view-for-you")?.addEventListener("click", handleRecommendationClick)
+  document.getElementById("rec-toolbar")?.addEventListener("click", event => {
+    const filterButton = event.target.closest("[data-rec-filter]")
+    if (filterButton) setRecommendationMediaFilter(filterButton.dataset.recFilter)
+  })
+  document.getElementById("rec-sort-mode")?.addEventListener("change", event => {
+    setRecommendationSortMode(event.target.value)
+  })
+  syncRecommendationToolbar()
 }
 window.loadRecommendations = loadRecommendations
 

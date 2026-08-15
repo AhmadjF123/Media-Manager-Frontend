@@ -482,6 +482,36 @@
           </div>
 
           <div id="recommendations-content" class="recommendations-content" hidden>
+            <div class="rec-toolbar" id="rec-toolbar">
+              <div class="rec-toolbar-copy">
+                <span class="rec-toolbar-label">Show me</span>
+                <div class="rec-media-filter" role="group" aria-label="Recommendation media type">
+                  <button type="button" class="rec-filter-btn active" data-rec-filter="all"><i class="fas fa-layer-group"></i> All</button>
+                  <button type="button" class="rec-filter-btn" data-rec-filter="movie"><i class="fas fa-film"></i> Movies</button>
+                  <button type="button" class="rec-filter-btn" data-rec-filter="series"><i class="fas fa-tv"></i> Series</button>
+                </div>
+              </div>
+              <div class="rec-sort-control">
+                <span class="rec-toolbar-label">Rank by</span>
+                <label class="rec-sort-shell" for="rec-sort-mode">
+                  <i class="fas fa-arrow-down-wide-short"></i>
+                  <select id="rec-sort-mode" aria-label="Sort recommendations">
+                    <option value="priority">Highest priority</option>
+                    <option value="universe">Same universe</option>
+                    <option value="latest">Latest released</option>
+                    <option value="continue">Continue franchise</option>
+                  </select>
+                  <i class="fas fa-chevron-down rec-sort-chevron"></i>
+                </label>
+              </div>
+              <div class="rec-toolbar-summary" id="rec-toolbar-summary">Smart mixed queue</div>
+            </div>
+
+            <div class="rec-filter-empty" id="recommendations-filter-empty" hidden>
+              <i class="fas fa-clapperboard"></i>
+              <div><strong>No picks in this view yet</strong><span>Try another media filter or ranking mode.</span></div>
+            </div>
+
             <section class="rec-section rec-section-featured" id="rec-section-top" hidden>
               <div class="rec-section-head">
                 <div>
