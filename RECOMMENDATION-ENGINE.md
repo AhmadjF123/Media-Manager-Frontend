@@ -10,3 +10,7 @@ The new **For You** view is backed by `/api/recommendations` and includes:
 Recommendation snapshots are cached locally so repeat visits open instantly. Refreshing the section asks the backend for a fresh build.
 
 For series, **Seasons Watched** is now editable separately from **Seasons**. This lets the recommendation engine understand exactly how far the user has watched even when new seasons are released later.
+
+## Smart universe search UI
+
+The For You view includes a debounced universe search with quick chips for Marvel, DC, Star Wars, Wizarding World and Middle-earth. Search results mix movies and series, show watched/in-vault/upcoming states, reuse the existing media-type and sort controls, cache recent searches in memory, and remain collapsible like the other For You sections.

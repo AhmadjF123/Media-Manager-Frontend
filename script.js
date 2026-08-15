@@ -173,6 +173,12 @@ const recommendationState = {
   itemMap: new Map(),
   mediaFilter: "all",
   sortMode: "priority",
+  searchQuery: "",
+  searchData: null,
+  searchLoading: false,
+  searchRequestSerial: 0,
+  searchDebounceTimer: null,
+  searchCache: new Map(),
 }
 
 function _cacheGet()          { return (Date.now() - _cache.ts < _cache.TTL) ? _cache.data : null }
@@ -3324,6 +3330,9 @@ function effectiveVaultWatchedSeasons(mediaItem) {
 }
 
 function shouldHideRecommendationAsAlreadyWatched(item) {
+  // Universe search intentionally shows the complete connected catalog, including
+  // titles already watched, and marks them clearly instead of hiding them.
+  if (item?.__universe_search) return false
   if (!item?.in_vault) return false
   const vaultItem = getVaultItemForRecommendation(item)
   if (!vaultItem) return false
@@ -3353,6 +3362,16 @@ function shouldHideRecommendationAsAlreadyWatched(item) {
 }
 
 function recommendationSignal(item, reasonType) {
+  if (item?.__universe_search) {
+    if (item.is_watched) return { icon: "fa-circle-check", label: "Watched", className: "is-watched" }
+    if (item.is_upcoming) return { icon: "fa-clock", label: "Upcoming", className: "is-upcoming" }
+    if (item.in_vault) return { icon: "fa-vault", label: "In your vault", className: "is-vault" }
+    return {
+      icon: "fa-diagram-project",
+      label: `${Math.max(0, Number(item.match_score) || 0)}% connected`,
+      className: "is-universe",
+    }
+  }
   if (reasonType === "new_season") {
     const nextSeason = Math.max(1, Number(item.progress?.next_season) || 1)
     return { icon: "fa-layer-group", label: `Season ${nextSeason} ready`, className: "is-next" }
@@ -3376,7 +3395,7 @@ function recommendationSignal(item, reasonType) {
 function buildRecommendationCard(item) {
   const article = document.createElement("article")
   const reasonType = item.primary_reason_type || item.reason_types?.[0] || "related"
-  article.className = `recommendation-card recommendation-card--collection rec-kind-${reasonType}${item.in_vault ? " is-in-vault" : ""}`
+  article.className = `recommendation-card recommendation-card--collection rec-kind-${reasonType}${item.in_vault ? " is-in-vault" : ""}${item.is_watched ? " is-watched" : ""}${item.is_upcoming ? " is-upcoming" : ""}`
   article.dataset.recKey = recommendationItemKey(item)
 
   const typeLabel = item.media_type === "movie" ? "Movie" : "Series"
@@ -3416,7 +3435,9 @@ function buildRecommendationCard(item) {
         <span class="rec-signal-badge ${signal.className}"><i class="fas ${signal.icon}"></i>${escapeHtml(signal.label)}</span>
       </div>
       <div class="rec-card-body">
-        <div class="rec-card-kicker">${escapeHtml(item.in_vault ? "In your vault" : "Suggested for you")}</div>
+        <div class="rec-card-kicker">${escapeHtml(item.__universe_search
+          ? (item.is_watched ? "Already watched" : item.in_vault ? "In your vault" : item.is_upcoming ? "Coming soon" : "Connected title")
+          : (item.in_vault ? "In your vault" : "Suggested for you"))}</div>
         <h3 title="${escapeHtml(item.title || "Untitled")}">${escapeHtml(item.title || "Untitled")}</h3>
         <p class="rec-card-genres">${escapeHtml(genres)}</p>
         <p class="rec-short-reason">${escapeHtml(reason)}</p>
@@ -3428,8 +3449,10 @@ function buildRecommendationCard(item) {
         <i class="fas fa-circle-info"></i> Details
       </button>
       ${item.in_vault
-        ? `<button type="button" class="rec-primary-action" data-rec-action="vault"><i class="fas fa-arrow-up-right-from-square"></i> Open in vault</button>`
-        : `<button type="button" class="rec-primary-action" data-rec-action="add"><i class="fas fa-plus"></i> Add to vault</button>`}
+        ? `<button type="button" class="rec-primary-action${item.is_watched ? " is-watched-action" : ""}" data-rec-action="vault"><i class="fas ${item.is_watched ? "fa-circle-check" : "fa-arrow-up-right-from-square"}"></i> ${item.is_watched ? "Watched · Open" : "Open in vault"}</button>`
+        : item.is_upcoming
+          ? `<button type="button" class="rec-primary-action" data-rec-action="add"><i class="fas fa-bookmark"></i> Add to vault</button>`
+          : `<button type="button" class="rec-primary-action" data-rec-action="add"><i class="fas fa-plus"></i> Add to vault</button>`}
     </div>
   `
   return article
@@ -3462,8 +3485,207 @@ function renderRecommendationSection(sectionKey, items = []) {
   grid.appendChild(fragment)
 }
 
+
+function setUniverseSearchLoading(show) {
+  recommendationState.searchLoading = Boolean(show)
+  const loader = document.getElementById("rec-universe-search-loader")
+  const input = document.getElementById("rec-universe-search-input")
+  if (loader) loader.hidden = !show
+  if (input) input.setAttribute("aria-busy", show ? "true" : "false")
+}
+
+function updateUniverseSearchStatus(text, tone = "neutral") {
+  const status = document.getElementById("rec-universe-search-status")
+  if (!status) return
+  status.textContent = text
+  status.dataset.tone = tone
+}
+
+function setUniverseSearchClearVisibility() {
+  const clear = document.getElementById("rec-universe-search-clear")
+  if (clear) clear.hidden = !recommendationState.searchQuery
+}
+
+function hideStandardRecommendationSectionsForSearch() {
+  Object.values(RECOMMENDATION_SECTIONS).forEach(config => {
+    const section = document.getElementById(config.sectionId)
+    if (section) section.hidden = true
+  })
+}
+
+function filterUniverseSearchItems(items) {
+  return (items || []).filter(item => {
+    if (recommendationState.mediaFilter === "movie") return item.media_type === "movie"
+    if (recommendationState.mediaFilter === "series") return item.media_type === "series"
+    return true
+  })
+}
+
+function renderUniverseSearchResults(data) {
+  if (!data || !recommendationState.searchQuery) return
+  recommendationState.searchData = data
+  recommendationState.itemMap.clear()
+  hideRecommendationMessages()
+  hideStandardRecommendationSectionsForSearch()
+  setUniverseSearchClearVisibility()
+
+  const content = document.getElementById("recommendations-content")
+  const section = document.getElementById("rec-section-search")
+  const grid = document.getElementById("rec-grid-search")
+  const count = document.getElementById("rec-count-search")
+  const title = document.getElementById("rec-search-results-title")
+  const copy = document.getElementById("rec-search-results-copy")
+  const stats = document.getElementById("rec-search-result-stats")
+  const filterEmpty = document.getElementById("recommendations-filter-empty")
+  if (!section || !grid) return
+
+  const filtered = filterUniverseSearchItems(data.results || [])
+  const sorted = sortRecommendationClientItems(filtered)
+  grid.innerHTML = ""
+  const fragment = document.createDocumentFragment()
+  for (const item of sorted) {
+    item.__universe_search = true
+    recommendationState.itemMap.set(recommendationItemKey(item), item)
+    fragment.appendChild(buildRecommendationCard(item))
+  }
+  grid.appendChild(fragment)
+
+  section.hidden = false
+  if (content) content.hidden = false
+  if (count) count.textContent = sorted.length
+  if (title) title.textContent = `${data.interpreted_as || data.query || recommendationState.searchQuery}`
+  if (copy) copy.textContent = sorted.length
+    ? `Everything we could connect to “${data.interpreted_as || data.query}” — watched titles stay visible so you can see the full universe.`
+    : `No connected titles matched this media filter.`
+
+  const watched = filtered.filter(item => item.is_watched).length
+  const unwatched = filtered.filter(item => !item.is_watched && !item.is_upcoming).length
+  const upcoming = filtered.filter(item => item.is_upcoming).length
+  const movies = filtered.filter(item => item.media_type === "movie").length
+  const series = filtered.filter(item => item.media_type === "series").length
+  if (stats) {
+    stats.innerHTML = `
+      <span><i class="fas fa-film"></i><b>${movies}</b> Movies</span>
+      <span><i class="fas fa-tv"></i><b>${series}</b> Series</span>
+      <span><i class="fas fa-circle-check"></i><b>${watched}</b> Watched</span>
+      <span><i class="fas fa-play"></i><b>${unwatched}</b> To watch</span>
+      ${upcoming ? `<span><i class="fas fa-clock"></i><b>${upcoming}</b> Upcoming</span>` : ""}`
+  }
+
+  if (filterEmpty) filterEmpty.hidden = sorted.length !== 0
+  const summary = document.getElementById("rec-toolbar-summary")
+  if (summary) summary.textContent = `${sorted.length} results · ${movies} movies · ${series} series`
+  ensureRecommendationSectionToggles()
+  syncRecommendationToolbar()
+}
+
+function getUniverseSearchCacheKey(query) {
+  return String(query || "").trim().toLowerCase()
+}
+
+async function runUniverseSearch(query, { force = false } = {}) {
+  const cleanQuery = String(query || "").trim().replace(/\s+/g, " ").slice(0, 80)
+  recommendationState.searchQuery = cleanQuery
+  const input = document.getElementById("rec-universe-search-input")
+  if (input && input.value !== cleanQuery) input.value = cleanQuery
+  setUniverseSearchClearVisibility()
+
+  if (cleanQuery.length < 2) {
+    recommendationState.searchData = null
+    recommendationState.itemMap.clear()
+    const searchSection = document.getElementById("rec-section-search")
+    if (searchSection) searchSection.hidden = true
+    updateUniverseSearchStatus("Fast search across connected studios, keywords and your vault graph.")
+    if (recommendationState.data) renderRecommendations(recommendationState.data, { force: true })
+    return
+  }
+
+  const cacheKey = getUniverseSearchCacheKey(cleanQuery)
+  if (!force) {
+    const cached = recommendationState.searchCache.get(cacheKey)
+    if (cached && Date.now() - cached.ts < 10 * 60_000) {
+      renderUniverseSearchResults(cached.data)
+      updateUniverseSearchStatus(`Showing cached results for ${cached.data.interpreted_as || cleanQuery}.`, "success")
+      return
+    }
+  }
+
+  const serial = ++recommendationState.searchRequestSerial
+  setUniverseSearchLoading(true)
+  updateUniverseSearchStatus(`Understanding “${cleanQuery}” and mapping its connected titles…`, "loading")
+
+  try {
+    const params = new URLSearchParams({ q: cleanQuery })
+    if (force) params.set("refresh", "1")
+    const response = await fetch(`${RECOMMENDATIONS_BASE_URL}/search?${params.toString()}`, { headers: authHeaders() })
+    if (serial !== recommendationState.searchRequestSerial) return
+    if (response.status === 401) {
+      handleUnauthorized()
+      return
+    }
+    const data = await response.json()
+    if (!response.ok || data?.error) throw new Error(data?.error || `Search returned ${response.status}`)
+    if (recommendationState.searchQuery !== cleanQuery) return
+
+    recommendationState.searchCache.set(cacheKey, { data, ts: Date.now() })
+    while (recommendationState.searchCache.size > 20) {
+      recommendationState.searchCache.delete(recommendationState.searchCache.keys().next().value)
+    }
+    renderUniverseSearchResults(data)
+    const total = Number(data.stats?.total) || (data.results || []).length
+    updateUniverseSearchStatus(
+      total ? `${total} connected titles found for ${data.interpreted_as || cleanQuery}.` : `No connected titles found for ${cleanQuery}.`,
+      total ? "success" : "neutral"
+    )
+  } catch (error) {
+    if (serial !== recommendationState.searchRequestSerial) return
+    console.error("Universe search failed:", error)
+    updateUniverseSearchStatus("Could not complete this search right now. Try again in a moment.", "error")
+    showToast("Universe search could not connect right now", "info")
+  } finally {
+    if (serial === recommendationState.searchRequestSerial) setUniverseSearchLoading(false)
+  }
+}
+
+function scheduleUniverseSearch(query) {
+  if (recommendationState.searchDebounceTimer) window.clearTimeout(recommendationState.searchDebounceTimer)
+  const cleanQuery = String(query || "").trim()
+  recommendationState.searchQuery = cleanQuery
+  setUniverseSearchClearVisibility()
+  if (cleanQuery.length < 2) {
+    void runUniverseSearch(cleanQuery)
+    return
+  }
+  updateUniverseSearchStatus(`Type detected. Searching for “${cleanQuery}”…`, "loading")
+  recommendationState.searchDebounceTimer = window.setTimeout(() => {
+    recommendationState.searchDebounceTimer = null
+    void runUniverseSearch(cleanQuery)
+  }, 320)
+}
+
+function clearUniverseSearch() {
+  if (recommendationState.searchDebounceTimer) window.clearTimeout(recommendationState.searchDebounceTimer)
+  recommendationState.searchDebounceTimer = null
+  recommendationState.searchRequestSerial += 1
+  recommendationState.searchQuery = ""
+  recommendationState.searchData = null
+  setUniverseSearchLoading(false)
+  const input = document.getElementById("rec-universe-search-input")
+  if (input) input.value = ""
+  setUniverseSearchClearVisibility()
+  const section = document.getElementById("rec-section-search")
+  if (section) section.hidden = true
+  updateUniverseSearchStatus("Fast search across connected studios, keywords and your vault graph.")
+  if (recommendationState.data) renderRecommendations(recommendationState.data, { force: true })
+}
+
 function renderRecommendations(data, { force = false } = {}) {
   if (!data) return
+  if (recommendationState.searchQuery) {
+    recommendationState.data = data
+    if (recommendationState.searchData) renderUniverseSearchResults(recommendationState.searchData)
+    return
+  }
   const signature = recommendationPayloadSignature(data)
   if (!force && signature === recommendationState.renderSignature) {
     recommendationState.data = data
@@ -3488,6 +3710,8 @@ function renderRecommendations(data, { force = false } = {}) {
   if (progressEl) progressEl.textContent = Number(profile.tracked_series_progress) || 0
   if (updatedEl) updatedEl.textContent = formatRecommendationUpdatedAt(data.generated_at)
 
+  const searchSection = document.getElementById("rec-section-search")
+  if (searchSection) searchSection.hidden = true
   const sections = data.sections || {}
   ensureRecommendationSectionToggles()
   syncRecommendationToolbar()
@@ -3686,20 +3910,44 @@ async function loadRecommendations({ force = false, background = false } = {}) {
 function setRecommendationMediaFilter(filter) {
   if (!new Set(["all", "movie", "series"]).has(filter)) return
   recommendationState.mediaFilter = filter
-  if (recommendationState.data) renderRecommendations(recommendationState.data, { force: true })
+  if (recommendationState.searchQuery && recommendationState.searchData) renderUniverseSearchResults(recommendationState.searchData)
+  else if (recommendationState.data) renderRecommendations(recommendationState.data, { force: true })
   else syncRecommendationToolbar()
 }
 
 function setRecommendationSortMode(mode) {
   if (!new Set(["priority", "universe", "latest", "continue"]).has(mode)) return
   recommendationState.sortMode = mode
-  if (recommendationState.data) renderRecommendations(recommendationState.data, { force: true })
+  if (recommendationState.searchQuery && recommendationState.searchData) renderUniverseSearchResults(recommendationState.searchData)
+  else if (recommendationState.data) renderRecommendations(recommendationState.data, { force: true })
   else syncRecommendationToolbar()
 }
 
 function initRecommendationsUI() {
   document.getElementById("recommendations-refresh-btn")?.addEventListener("click", () => {
-    void loadRecommendations({ force: true })
+    if (recommendationState.searchQuery) void runUniverseSearch(recommendationState.searchQuery, { force: true })
+    else void loadRecommendations({ force: true })
+  })
+  const universeSearchInput = document.getElementById("rec-universe-search-input")
+  universeSearchInput?.addEventListener("input", event => scheduleUniverseSearch(event.target.value))
+  universeSearchInput?.addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault()
+      if (recommendationState.searchDebounceTimer) window.clearTimeout(recommendationState.searchDebounceTimer)
+      recommendationState.searchDebounceTimer = null
+      void runUniverseSearch(event.target.value)
+    } else if (event.key === "Escape") {
+      clearUniverseSearch()
+      universeSearchInput.blur()
+    }
+  })
+  document.getElementById("rec-universe-search-clear")?.addEventListener("click", clearUniverseSearch)
+  document.querySelector(".rec-smart-search-chips")?.addEventListener("click", event => {
+    const chip = event.target.closest("[data-rec-universe-query]")
+    if (!chip) return
+    const query = chip.dataset.recUniverseQuery || ""
+    if (universeSearchInput) universeSearchInput.value = query
+    void runUniverseSearch(query)
   })
   document.getElementById("view-for-you")?.addEventListener("click", handleRecommendationClick)
   document.getElementById("recommendations-content")?.addEventListener("click", event => {

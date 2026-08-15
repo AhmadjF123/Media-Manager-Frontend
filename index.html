@@ -458,6 +458,30 @@
             </div>
           </section>
 
+          <section class="rec-smart-search" aria-label="Search a universe or franchise">
+            <div class="rec-smart-search-copy">
+              <span class="rec-smart-search-eyebrow"><i class="fas fa-sparkles"></i> Smart universe search</span>
+              <h2>Find everything connected</h2>
+              <p>Type Marvel, MCU, DC, Star Wars, a franchise, or a shared world. Search understands aliases and mixes movies + series.</p>
+            </div>
+            <div class="rec-smart-search-box">
+              <i class="fas fa-magnifying-glass rec-smart-search-icon"></i>
+              <input id="rec-universe-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search Marvel, DC, Star Wars…" aria-label="Search connected movies and series" />
+              <span class="rec-smart-search-loader" id="rec-universe-search-loader" hidden></span>
+              <button type="button" class="rec-smart-search-clear" id="rec-universe-search-clear" aria-label="Clear universe search" hidden><i class="fas fa-xmark"></i></button>
+            </div>
+            <div class="rec-smart-search-footer">
+              <div class="rec-smart-search-chips" aria-label="Quick universe searches">
+                <button type="button" data-rec-universe-query="Marvel">Marvel</button>
+                <button type="button" data-rec-universe-query="DC">DC</button>
+                <button type="button" data-rec-universe-query="Star Wars">Star Wars</button>
+                <button type="button" data-rec-universe-query="Wizarding World">Wizarding World</button>
+                <button type="button" data-rec-universe-query="Middle-earth">Middle-earth</button>
+              </div>
+              <span class="rec-smart-search-status" id="rec-universe-search-status">Fast search across connected studios, keywords and your vault graph.</span>
+            </div>
+          </section>
+
           <div id="recommendations-loading" class="recommendations-loading" hidden>
             <div class="recommendations-loading-head">
               <span class="rec-loading-pulse"></span>
@@ -511,6 +535,19 @@
               <i class="fas fa-clapperboard"></i>
               <div><strong>No picks in this view yet</strong><span>Try another media filter or ranking mode.</span></div>
             </div>
+
+            <section class="rec-section rec-section-search-results" id="rec-section-search" hidden>
+              <div class="rec-section-head">
+                <div>
+                  <span class="rec-section-kicker"><i class="fas fa-diagram-project"></i> Universe results</span>
+                  <h2 id="rec-search-results-title">Connected titles</h2>
+                  <p id="rec-search-results-copy">Movies and series connected to your search.</p>
+                  <div class="rec-search-result-stats" id="rec-search-result-stats"></div>
+                </div>
+                <b class="rec-section-count" id="rec-count-search">0</b>
+              </div>
+              <div class="rec-grid rec-grid-collection" id="rec-grid-search"></div>
+            </section>
 
             <section class="rec-section rec-section-featured" id="rec-section-top" hidden>
               <div class="rec-section-head">
