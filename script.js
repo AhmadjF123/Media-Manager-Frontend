@@ -3035,6 +3035,11 @@ function editItemDirectly(item) {
 // ════════════════════════════════════════════════
 
 const RECOMMENDATION_SECTIONS = {
+  top_picks: {
+    sectionId: "rec-section-top",
+    gridId: "rec-grid-top",
+    countId: "rec-count-top",
+  },
   continue_story: {
     sectionId: "rec-section-continue",
     gridId: "rec-grid-continue",
@@ -3076,6 +3081,42 @@ function recommendationPayloadSignature(data) {
       ])
     ])
   ))
+}
+
+function buildTopRecommendationFeed(sections = {}) {
+  const bucketMap = new Map()
+  const sourceOrder = ["continue_story", "from_vault", "new_releases", "because_you_watched"]
+
+  sourceOrder.forEach((sectionKey, sectionIndex) => {
+    const sourceItems = Array.isArray(sections[sectionKey]) ? sections[sectionKey] : []
+    sourceItems.forEach((item, itemIndex) => {
+      if (!item || shouldHideRecommendationAsAlreadyWatched(item)) return
+      const key = recommendationItemKey(item)
+      const score = Number(item.score) || 0
+      const rankBoost = (sourceOrder.length - sectionIndex) * 1000 - itemIndex
+      const enriched = { ...item, __feedScore: score + rankBoost, __originSection: sectionKey }
+      const existing = bucketMap.get(key)
+      if (!existing || enriched.__feedScore > existing.__feedScore) {
+        bucketMap.set(key, enriched)
+      }
+    })
+  })
+
+  const all = Array.from(bucketMap.values())
+  const movies = all
+    .filter(item => item.media_type === "movie")
+    .sort((a, b) => (Number(b.__feedScore) || 0) - (Number(a.__feedScore) || 0))
+  const series = all
+    .filter(item => item.media_type === "series")
+    .sort((a, b) => (Number(b.__feedScore) || 0) - (Number(a.__feedScore) || 0))
+
+  const mixed = []
+  while ((movies.length || series.length) && mixed.length < 18) {
+    if (movies.length) mixed.push(movies.shift())
+    if (series.length && mixed.length < 18) mixed.push(series.shift())
+  }
+
+  return mixed.slice(0, 18)
 }
 
 function setRecommendationsLoading(show) {
@@ -3173,37 +3214,28 @@ function recommendationSignal(item, reasonType) {
 function buildRecommendationCard(item) {
   const article = document.createElement("article")
   const reasonType = item.primary_reason_type || item.reason_types?.[0] || "related"
-  article.className = `recommendation-card rec-kind-${reasonType}${item.in_vault ? " is-in-vault" : ""}`
+  article.className = `recommendation-card recommendation-card--collection rec-kind-${reasonType}${item.in_vault ? " is-in-vault" : ""}`
   article.dataset.recKey = recommendationItemKey(item)
 
   const typeLabel = item.media_type === "movie" ? "Movie" : "Series"
-  const typeIcon = item.media_type === "movie" ? "fa-film" : "fa-tv"
   const year = item.release_year || "—"
-  const rating = Number(item.tmdb_rating) > 0 ? Number(item.tmdb_rating).toFixed(1) : "—"
-  const reason = item.primary_reason || item.reasons?.[0] || "Picked for you"
+  const ratingValue = Number(item.tmdb_rating) || 0
+  const rating = ratingValue > 0 ? ratingValue.toFixed(1) : "—"
   const signal = recommendationSignal(item, reasonType)
   const genres = Array.isArray(item.genres) && item.genres.length
-    ? item.genres.slice(0, 3).map(genre => `<span>${escapeHtml(genre)}</span>`).join("")
-    : `<span>Recommended</span>`
+    ? item.genres.slice(0, 3).join(", ")
+    : "Recommended"
+  const reason = item.primary_reason || item.reasons?.[0] || "Picked for you"
 
-  const progress = item.progress
   let progressHtml = ""
-  if (progress) {
-    const watched = Math.max(0, Number(progress.watched_seasons) || 0)
-    const aired = Math.max(0, Number(progress.aired_seasons) || 0)
-    const nextSeason = Math.max(1, Number(progress.next_season) || watched + 1)
-    const percent = Math.min(100, Math.max(0, (watched / Math.max(1, aired)) * 100))
-    const watchedCopy = watched > 0 ? `Watched through S${watched}` : "Start with Season 1"
-    progressHtml = `<div class="rec-progress">
-        <div class="rec-progress-head">
-          <span><i class="fas fa-route"></i> Your progress</span>
-          <strong>Season ${nextSeason} next</strong>
-        </div>
-        <div class="rec-progress-track"><i style="width:${percent}%"></i></div>
-        <div class="rec-progress-foot">
-          <span>${escapeHtml(watchedCopy)}</span>
-          <b>${watched}/${aired} seasons</b>
-        </div>
+  if (item.progress) {
+    const watched = Math.max(0, Number(item.progress.watched_seasons) || 0)
+    const aired = Math.max(0, Number(item.progress.aired_seasons) || 0)
+    const nextSeason = Math.max(1, Number(item.progress.next_season) || watched + 1)
+    progressHtml = `
+      <div class="rec-progress rec-progress-inline">
+        <span><i class="fas fa-layer-group"></i> ${watched}/${Math.max(1, aired)} seasons</span>
+        <strong>Next: Season ${nextSeason}</strong>
       </div>`
   }
 
@@ -3216,21 +3248,16 @@ function buildRecommendationCard(item) {
       <div class="rec-card-poster">
         ${posterHtml}
         <div class="rec-poster-shade"></div>
+        <span class="rec-collection-badge rec-year-badge">${escapeHtml(String(year))}</span>
+        <span class="rec-collection-badge rec-rating-badge"><i class="fas fa-star"></i>${escapeHtml(String(rating))}</span>
+        <span class="rec-type-pill"><i class="fas ${item.media_type === "movie" ? "fa-film" : "fa-tv"}"></i>${escapeHtml(typeLabel)}</span>
         <span class="rec-signal-badge ${signal.className}"><i class="fas ${signal.icon}"></i>${escapeHtml(signal.label)}</span>
-        ${item.in_vault ? `<span class="rec-vault-badge"><i class="fas fa-check"></i> In vault</span>` : ""}
       </div>
       <div class="rec-card-body">
-        <div class="rec-card-topline">
-          <span class="rec-type-label"><i class="fas ${typeIcon}"></i>${escapeHtml(typeLabel)}</span>
-          <span>${escapeHtml(String(year))}</span>
-          <span class="rec-rating"><i class="fas fa-star"></i>${escapeHtml(String(rating))}</span>
-        </div>
+        <div class="rec-card-kicker">${escapeHtml(item.in_vault ? "In your vault" : "Suggested for you")}</div>
         <h3 title="${escapeHtml(item.title || "Untitled")}">${escapeHtml(item.title || "Untitled")}</h3>
-        <div class="rec-genre-row">${genres}</div>
-        <div class="rec-reason-box">
-          <span class="rec-reason-label"><i class="fas ${recommendationReasonIcon(reasonType)}"></i> Why this pick</span>
-          <p class="rec-reason">${escapeHtml(reason)}</p>
-        </div>
+        <p class="rec-card-genres">${escapeHtml(genres)}</p>
+        <p class="rec-short-reason">${escapeHtml(reason)}</p>
         ${progressHtml}
       </div>
     </button>
@@ -3298,8 +3325,12 @@ function renderRecommendations(data, { force = false } = {}) {
   if (updatedEl) updatedEl.textContent = formatRecommendationUpdatedAt(data.generated_at)
 
   const sections = data.sections || {}
-  let total = 0
+  const topFeed = buildTopRecommendationFeed(sections)
+  let total = topFeed.length
+  renderRecommendationSection("top_picks", topFeed)
+
   for (const key of Object.keys(RECOMMENDATION_SECTIONS)) {
+    if (key === "top_picks") continue
     const items = Array.isArray(sections[key]) ? sections[key] : []
     const visibleItems = items.filter(item => !shouldHideRecommendationAsAlreadyWatched(item))
     total += visibleItems.length
