@@ -162,7 +162,7 @@ let sortState = loadSortState()
 const _cache = { data: null, ts: 0, TTL: 60_000 }   // 60s in-memory cache
 const COLLECTION_SNAPSHOT_PREFIX = "cinema_collection_snapshot_v2"
 const COLLECTION_SNAPSHOT_MAX_AGE = 7 * 24 * 60 * 60 * 1000
-const RECOMMENDATION_SNAPSHOT_PREFIX = "cinema_recommendations_snapshot_v1"
+const RECOMMENDATION_SNAPSHOT_PREFIX = "cinema_recommendations_snapshot_v2"
 const RECOMMENDATION_SNAPSHOT_MAX_AGE = 6 * 60 * 60 * 1000
 const recommendationState = {
   data: null,
@@ -3109,30 +3109,103 @@ function recommendationReasonIcon(type) {
   return "fa-wand-magic-sparkles"
 }
 
+function effectiveVaultWatchedSeasons(mediaItem) {
+  if (!mediaItem || mediaItem.media_type !== "series") return 0
+  const savedSeasons = Math.max(0, Number(mediaItem.number_of_seasons) || 0)
+  const hasTracked = mediaItem.watched_seasons !== null &&
+    mediaItem.watched_seasons !== undefined &&
+    mediaItem.watched_seasons !== "" &&
+    Number.isFinite(Number(mediaItem.watched_seasons))
+  const tracked = hasTracked ? Math.max(0, Number(mediaItem.watched_seasons)) : null
+
+  if (mediaItem.watch_status === "watched") return Math.max(savedSeasons, tracked ?? 0)
+  if (!mediaItem.watch_status) return tracked !== null && tracked > 0 ? tracked : savedSeasons
+  return tracked ?? 0
+}
+
+function shouldHideRecommendationAsAlreadyWatched(item) {
+  if (!item?.in_vault) return false
+  const vaultItem = getVaultItemForRecommendation(item)
+  if (!vaultItem) return false
+
+  const reasonTypes = Array.isArray(item.reason_types) ? item.reason_types : []
+  const isNewSeason = item.primary_reason_type === "new_season" || reasonTypes.includes("new_season")
+
+  if (isNewSeason) {
+    const aired = Math.max(0, Number(item.progress?.aired_seasons) || 0)
+    if (!aired) return false
+
+    const savedSeasons = Math.max(0, Number(vaultItem.number_of_seasons) || 0)
+    const trackedSeasons = Math.max(0, Number(vaultItem.watched_seasons) || 0)
+    const completedSemantics = vaultItem.watch_status === "watched" || !vaultItem.watch_status
+
+    // Old vault entries can have no season metadata at all. They still mean the
+    // series was watched, so suppress the stale 0/N recommendation while the new
+    // backend establishes a proper baseline from TMDB.
+    if (completedSemantics && savedSeasons === 0 && trackedSeasons === 0) return true
+
+    return effectiveVaultWatchedSeasons(vaultItem) >= aired
+  }
+
+  // Existing collections before watch-status tracking represented watched titles.
+  // Never recommend those titles back to the user as something they still need to see.
+  return vaultItem.watch_status === "watched" || !vaultItem.watch_status
+}
+
+function recommendationSignal(item, reasonType) {
+  if (reasonType === "new_season") {
+    const nextSeason = Math.max(1, Number(item.progress?.next_season) || 1)
+    return { icon: "fa-layer-group", label: `Season ${nextSeason} ready`, className: "is-next" }
+  }
+  if (reasonType === "franchise_next") {
+    return { icon: "fa-forward-step", label: "Next chapter", className: "is-next" }
+  }
+  if (item.in_vault) {
+    return { icon: "fa-vault", label: "Ready in your vault", className: "is-vault" }
+  }
+  return {
+    icon: "fa-bullseye",
+    label: `${Math.max(0, Number(item.match_score) || 0)}% match`,
+    className: "is-match",
+  }
+}
+
 function buildRecommendationCard(item) {
   const article = document.createElement("article")
-  article.className = `recommendation-card${item.in_vault ? " is-in-vault" : ""}`
+  const reasonType = item.primary_reason_type || item.reason_types?.[0] || "related"
+  article.className = `recommendation-card rec-kind-${reasonType}${item.in_vault ? " is-in-vault" : ""}`
   article.dataset.recKey = recommendationItemKey(item)
 
   const typeLabel = item.media_type === "movie" ? "Movie" : "Series"
+  const typeIcon = item.media_type === "movie" ? "fa-film" : "fa-tv"
   const year = item.release_year || "—"
   const rating = Number(item.tmdb_rating) > 0 ? Number(item.tmdb_rating).toFixed(1) : "—"
   const reason = item.primary_reason || item.reasons?.[0] || "Picked for you"
-  const reasonType = item.primary_reason_type || item.reason_types?.[0] || "related"
+  const signal = recommendationSignal(item, reasonType)
   const genres = Array.isArray(item.genres) && item.genres.length
     ? item.genres.slice(0, 3).map(genre => `<span>${escapeHtml(genre)}</span>`).join("")
-    : ""
+    : `<span>Recommended</span>`
+
   const progress = item.progress
-  const progressHtml = progress
-    ? `<div class="rec-progress">
-        <div class="rec-progress-copy">
-          <span>Series progress</span>
-          <b>${Number(progress.watched_seasons) || 0}/${Number(progress.aired_seasons) || 0} seasons</b>
+  let progressHtml = ""
+  if (progress) {
+    const watched = Math.max(0, Number(progress.watched_seasons) || 0)
+    const aired = Math.max(0, Number(progress.aired_seasons) || 0)
+    const nextSeason = Math.max(1, Number(progress.next_season) || watched + 1)
+    const percent = Math.min(100, Math.max(0, (watched / Math.max(1, aired)) * 100))
+    const watchedCopy = watched > 0 ? `Watched through S${watched}` : "Start with Season 1"
+    progressHtml = `<div class="rec-progress">
+        <div class="rec-progress-head">
+          <span><i class="fas fa-route"></i> Your progress</span>
+          <strong>Season ${nextSeason} next</strong>
         </div>
-        <div class="rec-progress-track"><i style="width:${Math.min(100, Math.max(0, ((Number(progress.watched_seasons) || 0) / Math.max(1, Number(progress.aired_seasons) || 1)) * 100))}%"></i></div>
-        <small>Next: Season ${Number(progress.next_season) || (Number(progress.watched_seasons) || 0) + 1}</small>
+        <div class="rec-progress-track"><i style="width:${percent}%"></i></div>
+        <div class="rec-progress-foot">
+          <span>${escapeHtml(watchedCopy)}</span>
+          <b>${watched}/${aired} seasons</b>
+        </div>
       </div>`
-    : ""
+  }
 
   const posterHtml = item.poster_url
     ? `<img src="${escapeHtml(item.poster_url)}" alt="${escapeHtml(item.title)} poster" loading="lazy" decoding="async" />`
@@ -3142,16 +3215,22 @@ function buildRecommendationCard(item) {
     <button type="button" class="rec-card-main" data-rec-action="open" aria-label="Open ${escapeHtml(item.title)}">
       <div class="rec-card-poster">
         ${posterHtml}
-        <span class="rec-match-badge"><i class="fas fa-bullseye"></i> ${Number(item.match_score) || 0}%</span>
-        ${item.in_vault ? `<span class="rec-vault-badge"><i class="fas fa-vault"></i> In vault</span>` : ""}
+        <div class="rec-poster-shade"></div>
+        <span class="rec-signal-badge ${signal.className}"><i class="fas ${signal.icon}"></i>${escapeHtml(signal.label)}</span>
+        ${item.in_vault ? `<span class="rec-vault-badge"><i class="fas fa-check"></i> In vault</span>` : ""}
       </div>
       <div class="rec-card-body">
         <div class="rec-card-topline">
-          <span>${escapeHtml(typeLabel)}</span><i></i><span>${escapeHtml(String(year))}</span><i></i><span><i class="fas fa-star"></i> ${escapeHtml(String(rating))}</span>
+          <span class="rec-type-label"><i class="fas ${typeIcon}"></i>${escapeHtml(typeLabel)}</span>
+          <span>${escapeHtml(String(year))}</span>
+          <span class="rec-rating"><i class="fas fa-star"></i>${escapeHtml(String(rating))}</span>
         </div>
-        <h3>${escapeHtml(item.title || "Untitled")}</h3>
+        <h3 title="${escapeHtml(item.title || "Untitled")}">${escapeHtml(item.title || "Untitled")}</h3>
         <div class="rec-genre-row">${genres}</div>
-        <p class="rec-reason"><i class="fas ${recommendationReasonIcon(reasonType)}"></i>${escapeHtml(reason)}</p>
+        <div class="rec-reason-box">
+          <span class="rec-reason-label"><i class="fas ${recommendationReasonIcon(reasonType)}"></i> Why this pick</span>
+          <p class="rec-reason">${escapeHtml(reason)}</p>
+        </div>
         ${progressHtml}
       </div>
     </button>
@@ -3175,13 +3254,17 @@ function renderRecommendationSection(sectionKey, items = []) {
   const count = document.getElementById(config.countId)
   if (!section || !grid) return
 
+  // Front-end safety net for stale snapshots or an older backend response.
+  // A title already completed in the vault must never be rendered as a next watch.
+  const visibleItems = items.filter(item => !shouldHideRecommendationAsAlreadyWatched(item))
+
   grid.innerHTML = ""
-  section.hidden = !items.length
-  if (count) count.textContent = items.length
-  if (!items.length) return
+  section.hidden = !visibleItems.length
+  if (count) count.textContent = visibleItems.length
+  if (!visibleItems.length) return
 
   const fragment = document.createDocumentFragment()
-  for (const item of items) {
+  for (const item of visibleItems) {
     recommendationState.itemMap.set(recommendationItemKey(item), item)
     fragment.appendChild(buildRecommendationCard(item))
   }
@@ -3218,8 +3301,9 @@ function renderRecommendations(data, { force = false } = {}) {
   let total = 0
   for (const key of Object.keys(RECOMMENDATION_SECTIONS)) {
     const items = Array.isArray(sections[key]) ? sections[key] : []
-    total += items.length
-    renderRecommendationSection(key, items)
+    const visibleItems = items.filter(item => !shouldHideRecommendationAsAlreadyWatched(item))
+    total += visibleItems.length
+    renderRecommendationSection(key, visibleItems)
   }
 
   if (content) content.hidden = total === 0
