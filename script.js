@@ -162,7 +162,7 @@ let sortState = loadSortState()
 const _cache = { data: null, ts: 0, TTL: 60_000 }   // 60s in-memory cache
 const COLLECTION_SNAPSHOT_PREFIX = "cinema_collection_snapshot_v2"
 const COLLECTION_SNAPSHOT_MAX_AGE = 7 * 24 * 60 * 60 * 1000
-const RECOMMENDATION_SNAPSHOT_PREFIX = "cinema_recommendations_snapshot_v3"
+const RECOMMENDATION_SNAPSHOT_PREFIX = "cinema_recommendations_snapshot_v4"
 const RECOMMENDATION_SNAPSHOT_MAX_AGE = 6 * 60 * 60 * 1000
 const recommendationState = {
   data: null,
@@ -3052,6 +3052,11 @@ const RECOMMENDATION_SECTIONS = {
     gridId: "rec-grid-vault",
     countId: "rec-count-vault",
   },
+  connected_universes: {
+    sectionId: "rec-section-universe",
+    gridId: "rec-grid-universe",
+    countId: "rec-count-universe",
+  },
   new_releases: {
     sectionId: "rec-section-new",
     gridId: "rec-grid-new",
@@ -3087,8 +3092,9 @@ function recommendationPayloadSignature(data) {
 
 function recommendationConnectionRank(item) {
   const types = new Set([item.primary_reason_type, ...(Array.isArray(item.reason_types) ? item.reason_types : [])].filter(Boolean))
-  if (types.has("franchise_next")) return 5
-  if (types.has("new_season")) return 4
+  if (types.has("same_universe")) return 7
+  if (types.has("franchise_next")) return 6
+  if (types.has("new_season")) return 5
   if (types.has("because_watched")) return 3
   return item.in_vault ? 2 : 1
 }
@@ -3160,7 +3166,7 @@ function interleaveRecommendationTypes(items, limit = 18) {
 
 function buildTopRecommendationFeed(sections = {}) {
   const bucketMap = new Map()
-  const sourceOrder = ["continue_story", "from_vault", "new_releases", "because_you_watched"]
+  const sourceOrder = ["continue_story", "connected_universes", "from_vault", "new_releases", "because_you_watched"]
 
   sourceOrder.forEach((sectionKey, sectionIndex) => {
     const sourceItems = Array.isArray(sections[sectionKey]) ? sections[sectionKey] : []
@@ -3208,6 +3214,69 @@ function syncRecommendationToolbar() {
   if (sortSelect && sortSelect.value !== recommendationState.sortMode) sortSelect.value = recommendationState.sortMode
 }
 
+const RECOMMENDATION_COLLAPSE_KEY = "cinema_for_you_collapsed_sections_v1"
+
+function readRecommendationCollapsedSections() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECOMMENDATION_COLLAPSE_KEY) || "[]")
+    return new Set(Array.isArray(parsed) ? parsed : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeRecommendationCollapsedSections(set) {
+  try { localStorage.setItem(RECOMMENDATION_COLLAPSE_KEY, JSON.stringify(Array.from(set))) } catch {}
+}
+
+function syncRecommendationSectionCollapse(section) {
+  if (!section?.id) return
+  const collapsed = readRecommendationCollapsedSections().has(section.id)
+  section.classList.toggle("is-collapsed", collapsed)
+  const button = section.querySelector("[data-rec-section-toggle]")
+  if (button) {
+    button.setAttribute("aria-expanded", collapsed ? "false" : "true")
+    button.setAttribute("title", collapsed ? "Open section" : "Collapse section")
+    const icon = button.querySelector("i")
+    if (icon) icon.className = `fas ${collapsed ? "fa-chevron-down" : "fa-chevron-up"}`
+  }
+}
+
+function ensureRecommendationSectionToggles() {
+  document.querySelectorAll("#recommendations-content .rec-section").forEach(section => {
+    const head = section.querySelector(".rec-section-head")
+    if (!head) return
+    let controls = head.querySelector(".rec-section-head-controls")
+    if (!controls) {
+      controls = document.createElement("div")
+      controls.className = "rec-section-head-controls"
+      const count = head.querySelector(".rec-section-count")
+      if (count) controls.appendChild(count)
+      head.appendChild(controls)
+    }
+    if (!controls.querySelector("[data-rec-section-toggle]")) {
+      const button = document.createElement("button")
+      button.type = "button"
+      button.className = "rec-section-toggle"
+      button.dataset.recSectionToggle = section.id
+      button.setAttribute("aria-label", "Collapse or open this recommendation section")
+      button.innerHTML = '<i class="fas fa-chevron-up"></i>'
+      controls.appendChild(button)
+    }
+    syncRecommendationSectionCollapse(section)
+  })
+}
+
+function toggleRecommendationSection(sectionId) {
+  const section = document.getElementById(sectionId)
+  if (!section) return
+  const collapsedSections = readRecommendationCollapsedSections()
+  if (collapsedSections.has(sectionId)) collapsedSections.delete(sectionId)
+  else collapsedSections.add(sectionId)
+  writeRecommendationCollapsedSections(collapsedSections)
+  syncRecommendationSectionCollapse(section)
+}
+
 function setRecommendationsLoading(show) {
   const loading = document.getElementById("recommendations-loading")
   if (loading) loading.hidden = !show
@@ -3235,6 +3304,7 @@ function formatRecommendationUpdatedAt(value) {
 function recommendationReasonIcon(type) {
   if (type === "new_season") return "fa-layer-group"
   if (type === "franchise_next") return "fa-forward-step"
+  if (type === "same_universe") return "fa-sitemap"
   if (type === "because_watched") return "fa-link"
   return "fa-wand-magic-sparkles"
 }
@@ -3289,6 +3359,9 @@ function recommendationSignal(item, reasonType) {
   }
   if (reasonType === "franchise_next") {
     return { icon: "fa-forward-step", label: "Next chapter", className: "is-next" }
+  }
+  if (reasonType === "same_universe") {
+    return { icon: "fa-sitemap", label: "Same universe", className: "is-universe" }
   }
   if (item.in_vault) {
     return { icon: "fa-vault", label: "Ready in your vault", className: "is-vault" }
@@ -3416,6 +3489,7 @@ function renderRecommendations(data, { force = false } = {}) {
   if (updatedEl) updatedEl.textContent = formatRecommendationUpdatedAt(data.generated_at)
 
   const sections = data.sections || {}
+  ensureRecommendationSectionToggles()
   syncRecommendationToolbar()
   const topFeed = buildTopRecommendationFeed(sections)
   let total = topFeed.length
@@ -3628,6 +3702,14 @@ function initRecommendationsUI() {
     void loadRecommendations({ force: true })
   })
   document.getElementById("view-for-you")?.addEventListener("click", handleRecommendationClick)
+  document.getElementById("recommendations-content")?.addEventListener("click", event => {
+    const toggle = event.target.closest("[data-rec-section-toggle]")
+    if (!toggle) return
+    event.preventDefault()
+    event.stopPropagation()
+    toggleRecommendationSection(toggle.dataset.recSectionToggle)
+  })
+  ensureRecommendationSectionToggles()
   document.getElementById("rec-toolbar")?.addEventListener("click", event => {
     const filterButton = event.target.closest("[data-rec-filter]")
     if (filterButton) setRecommendationMediaFilter(filterButton.dataset.recFilter)

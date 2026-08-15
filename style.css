@@ -7109,3 +7109,59 @@ html[data-theme="light"] body .rec-sort-shell { background: rgba(255,255,255,.72
     font-size: .68rem;
   }
 }
+
+
+/* ===== For You: collapsible sections + universe badges ===== */
+.rec-section-head-controls {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.rec-section-toggle {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid rgba(212,168,67,.22);
+  border-radius: 999px;
+  color: var(--gold-light, #e7be56);
+  background: rgba(212,168,67,.08);
+  cursor: pointer;
+  transition: transform .18s ease, background .18s ease, border-color .18s ease;
+}
+.rec-section-toggle:hover {
+  transform: translateY(-1px);
+  border-color: rgba(212,168,67,.48);
+  background: rgba(212,168,67,.15);
+}
+.rec-section-toggle i { font-size: .72rem; transition: transform .2s ease; }
+.rec-section.is-collapsed .rec-grid { display: none !important; }
+.rec-section.is-collapsed .rec-section-head { margin-bottom: 0; }
+.rec-section.is-collapsed { padding-bottom: 18px; }
+.rec-section-universe {
+  border-color: rgba(127,105,228,.18);
+  background: radial-gradient(circle at 92% 8%, rgba(115,92,220,.1), transparent 30%), var(--surface, transparent);
+}
+.recommendation-card--collection .rec-signal-badge.is-universe,
+.rec-signal-badge.is-universe {
+  color: #f5efff;
+  background: rgba(83,61,137,.92);
+  border-color: rgba(191,166,255,.34);
+  box-shadow: 0 7px 20px rgba(60,39,118,.24);
+}
+body.light-theme .rec-section-toggle,
+html[data-theme="light"] body .rec-section-toggle {
+  color: #9b7115;
+  background: rgba(212,168,67,.09);
+  border-color: rgba(177,132,32,.25);
+}
+body.light-theme .rec-section-universe,
+html[data-theme="light"] body .rec-section-universe {
+  background: radial-gradient(circle at 92% 8%, rgba(115,92,220,.06), transparent 30%), rgba(255,255,255,.72);
+}
+@media (max-width: 700px) {
+  .rec-section-head-controls { gap: 7px; }
+  .rec-section-toggle { width: 34px; height: 34px; }
+}
