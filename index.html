@@ -67,6 +67,9 @@
           >
             <i class="fas fa-layer-group"></i><span>Collection</span>
           </button>
+          <button class="nav-pill nav-for-you" id="nav-for-you" onclick="switchView('for-you')">
+            <i class="fas fa-wand-magic-sparkles"></i><span>For You</span>
+          </button>
           <button class="nav-pill" id="nav-add" onclick="switchView('add')">
             <i class="fas fa-plus"></i><span>Add New</span>
           </button>
@@ -429,6 +432,106 @@
         </div>
       </section>
 
+      <!-- ═══════════ FOR YOU / RECOMMENDATIONS VIEW ═══════════ -->
+      <section class="view recommendations-view" id="view-for-you" style="display: none">
+        <div class="recommendations-shell">
+          <section class="recommendations-hero">
+            <div class="recommendations-hero-copy">
+              <span class="recommendations-eyebrow"><i class="fas fa-wand-magic-sparkles"></i> Personal watch intelligence</span>
+              <h1>What should you watch next?</h1>
+              <p>
+                Built from your watch history, franchises, series progress and the titles already waiting in your vault.
+              </p>
+              <div class="recommendations-profile" id="recommendations-profile">
+                <span><i class="fas fa-film"></i> <b id="rec-profile-watched">0</b> watched</span>
+                <span><i class="fas fa-layer-group"></i> <b id="rec-profile-vault">0</b> in vault</span>
+                <span><i class="fas fa-route"></i> <b id="rec-profile-progress">0</b> series tracked</span>
+              </div>
+            </div>
+            <div class="recommendations-hero-actions">
+              <button type="button" id="recommendations-refresh-btn" class="recommendations-refresh-btn">
+                <i class="fas fa-arrows-rotate"></i>
+                <span>Refresh picks</span>
+              </button>
+              <small id="recommendations-updated-label">Your picks update as your vault changes.</small>
+            </div>
+          </section>
+
+          <div id="recommendations-loading" class="recommendations-loading" hidden>
+            <div class="recommendations-loading-head">
+              <span class="rec-loading-pulse"></span>
+              <div><b>Building your watch map…</b><small>Checking what connects to what you've already seen.</small></div>
+            </div>
+            <div class="recommendations-skeleton-grid">
+              <div class="rec-skeleton-card"></div><div class="rec-skeleton-card"></div>
+              <div class="rec-skeleton-card"></div><div class="rec-skeleton-card"></div>
+            </div>
+          </div>
+
+          <div id="recommendations-error" class="recommendations-empty" hidden>
+            <i class="fas fa-satellite-dish"></i>
+            <h3>Recommendations are temporarily unavailable</h3>
+            <p id="recommendations-error-message">Your collection is safe. Try refreshing the picks in a moment.</p>
+          </div>
+
+          <div id="recommendations-empty" class="recommendations-empty" hidden>
+            <i class="fas fa-clapperboard"></i>
+            <h3>Give the engine a little watch history</h3>
+            <p>Mark titles as watched, or keep your existing legacy collection. The engine will learn from what you have seen.</p>
+          </div>
+
+          <div id="recommendations-content" class="recommendations-content" hidden>
+            <section class="rec-section" id="rec-section-continue" hidden>
+              <div class="rec-section-head">
+                <div>
+                  <span class="rec-section-kicker"><i class="fas fa-forward-step"></i> Highest priority</span>
+                  <h2>Continue the story</h2>
+                  <p>New seasons, sequels and the next released chapter in a franchise.</p>
+                </div>
+                <b class="rec-section-count" id="rec-count-continue">0</b>
+              </div>
+              <div class="rec-grid" id="rec-grid-continue"></div>
+            </section>
+
+            <section class="rec-section" id="rec-section-vault" hidden>
+              <div class="rec-section-head">
+                <div>
+                  <span class="rec-section-kicker"><i class="fas fa-vault"></i> Already in your collection</span>
+                  <h2>Watch from your vault</h2>
+                  <p>Unwatched titles you already saved, ranked by how strongly they connect to what you liked.</p>
+                </div>
+                <b class="rec-section-count" id="rec-count-vault">0</b>
+              </div>
+              <div class="rec-grid" id="rec-grid-vault"></div>
+            </section>
+
+            <section class="rec-section" id="rec-section-new" hidden>
+              <div class="rec-section-head">
+                <div>
+                  <span class="rec-section-kicker"><i class="fas fa-bolt"></i> Recent releases</span>
+                  <h2>New releases for you</h2>
+                  <p>Recent released movies and series you do not have yet, ordered with the newest years first.</p>
+                </div>
+                <b class="rec-section-count" id="rec-count-new">0</b>
+              </div>
+              <div class="rec-grid" id="rec-grid-new"></div>
+            </section>
+
+            <section class="rec-section" id="rec-section-because" hidden>
+              <div class="rec-section-head">
+                <div>
+                  <span class="rec-section-kicker"><i class="fas fa-link"></i> Connected picks</span>
+                  <h2>Because you watched…</h2>
+                  <p>Spin-offs, related titles and strong recommendations discovered from your watch history.</p>
+                </div>
+                <b class="rec-section-count" id="rec-count-because">0</b>
+              </div>
+              <div class="rec-grid" id="rec-grid-because"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+
       <!-- ═══════════ ADD VIEW ═══════════ -->
       <section class="view" id="view-add" style="display: none">
         <div class="add-wrap">
@@ -441,6 +544,7 @@
             </div>
 
             <form id="add-form" class="a-form">
+              <input type="hidden" id="tmdb-id" />
               <div class="frow">
                 <div class="fgrp">
                   <label for="title">Title</label>
@@ -542,6 +646,11 @@
                     <div class="personal-field personal-field--count">
                       <label for="rewatch-count">Times Watched</label>
                       <input type="number" id="rewatch-count" min="0" placeholder="0" class="personal-input" />
+                    </div>
+
+                    <div class="personal-field personal-field--progress" id="watched-seasons-group" hidden>
+                      <label for="watched-seasons">Seasons Watched</label>
+                      <input type="number" id="watched-seasons" min="0" step="1" placeholder="0" class="personal-input" />
                     </div>
 
                     <div class="personal-field personal-field--fav">
@@ -926,6 +1035,7 @@
           <form id="edit-form" class="a-form">
             <input type="hidden" id="edit-id" />
             <input type="hidden" id="edit-order" />
+            <input type="hidden" id="edit-tmdb-id" />
             <div class="frow">
               <div class="fgrp">
                 <label for="edit-title">Title</label>
@@ -1022,6 +1132,11 @@
                     <div class="personal-field personal-field--count">
                       <label for="edit-rewatch-count">Times Watched</label>
                       <input type="number" id="edit-rewatch-count" min="0" placeholder="0" class="personal-input" />
+                    </div>
+
+                    <div class="personal-field personal-field--progress" id="edit-watched-seasons-group" hidden>
+                      <label for="edit-watched-seasons">Seasons Watched</label>
+                      <input type="number" id="edit-watched-seasons" min="0" step="1" placeholder="0" class="personal-input" />
                     </div>
 
                     <div class="personal-field personal-field--fav">

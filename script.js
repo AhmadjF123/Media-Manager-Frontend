@@ -16,6 +16,7 @@ const TMDB_IMAGE_URL  = "https://image.tmdb.org/t/p/w500"
 const API_BASE_URL    = "https://media-manager-backend-wfeb.onrender.com/api/media"
 const AUTH_BASE_URL   = "https://media-manager-backend-wfeb.onrender.com/api/auth"
 const SOCIAL_BASE_URL = "https://media-manager-backend-wfeb.onrender.com/api/social"
+const RECOMMENDATIONS_BASE_URL = "https://media-manager-backend-wfeb.onrender.com/api/recommendations"
 
 // ── Auth State ──
 let currentUser = null   // null = guest, otherwise authenticated public profile + token
@@ -51,6 +52,7 @@ const selectAllCheckbox = document.getElementById("select-all")
 const editBtn           = document.getElementById("edit-btn")
 const deleteBtn         = document.getElementById("delete-btn")
 const addForm           = document.getElementById("add-form")
+const tmdbIdInput       = document.getElementById("tmdb-id")
 const titleInput        = document.getElementById("title")
 const genreInput        = document.getElementById("genre")
 const releaseYearInput  = document.getElementById("release-year")
@@ -58,6 +60,8 @@ const endYearInput      = document.getElementById("end-year")
 const endYearGroup      = document.getElementById("end-year-group")
 const seasonsInput      = document.getElementById("number-of-seasons")
 const seasonsGroup      = document.getElementById("seasons-group")
+const watchedSeasonsInput = document.getElementById("watched-seasons")
+const watchedSeasonsGroup = document.getElementById("watched-seasons-group")
 const ratingInput       = document.getElementById("rating")
 const mediaTypeSelect   = document.getElementById("media-type")
 const autoFillBtn       = document.getElementById("auto-fill-btn")
@@ -71,6 +75,7 @@ const closeModalBtn     = document.querySelector(".close")
 const editForm          = document.getElementById("edit-form")
 const editIdInput       = document.getElementById("edit-id")
 const editOrderInput    = document.getElementById("edit-order")
+const editTmdbIdInput   = document.getElementById("edit-tmdb-id")
 const editTitleInput    = document.getElementById("edit-title")
 const editGenreInput    = document.getElementById("edit-genre")
 const editReleaseYearInput = document.getElementById("edit-release-year")
@@ -78,6 +83,8 @@ const editEndYearInput  = document.getElementById("edit-end-year")
 const editEndYearGroup  = document.getElementById("edit-end-year-group")
 const editSeasonsInput  = document.getElementById("edit-number-of-seasons")
 const editSeasonsGroup  = document.getElementById("edit-seasons-group")
+const editWatchedSeasonsInput = document.getElementById("edit-watched-seasons")
+const editWatchedSeasonsGroup = document.getElementById("edit-watched-seasons-group")
 const editRatingInput   = document.getElementById("edit-rating")
 const editMediaTypeInput = document.getElementById("edit-media-type")
 const editAutoFillBtn   = document.getElementById("edit-auto-fill-btn")
@@ -155,12 +162,23 @@ let sortState = loadSortState()
 const _cache = { data: null, ts: 0, TTL: 60_000 }   // 60s in-memory cache
 const COLLECTION_SNAPSHOT_PREFIX = "cinema_collection_snapshot_v2"
 const COLLECTION_SNAPSHOT_MAX_AGE = 7 * 24 * 60 * 60 * 1000
+const RECOMMENDATION_SNAPSHOT_PREFIX = "cinema_recommendations_snapshot_v1"
+const RECOMMENDATION_SNAPSHOT_MAX_AGE = 6 * 60 * 60 * 1000
+const recommendationState = {
+  data: null,
+  loadedAt: 0,
+  loading: false,
+  requestSerial: 0,
+  renderSignature: "",
+  itemMap: new Map(),
+}
 
 function _cacheGet()          { return (Date.now() - _cache.ts < _cache.TTL) ? _cache.data : null }
 function _cacheSet(data)      { _cache.data = data; _cache.ts = Date.now() }
 function _cacheInvalidate() {
   _cache.ts = 0
   _actorVaultCandidatesCache.clear()
+  invalidateRecommendationClientCache()
 }
 
 function getCollectionSnapshotKey() {
@@ -196,6 +214,44 @@ function clearCollectionSnapshot() {
   try { localStorage.removeItem(getCollectionSnapshotKey()) } catch (_) {}
 }
 
+function getRecommendationSnapshotKey() {
+  const username = currentUser?.username || localStorage.getItem("cinema_username") || "guest"
+  return `${RECOMMENDATION_SNAPSHOT_PREFIX}:${String(username).toLowerCase()}`
+}
+
+function saveRecommendationSnapshot(data) {
+  if (!currentUser || !data) return
+  try {
+    localStorage.setItem(getRecommendationSnapshotKey(), JSON.stringify({
+      savedAt: Date.now(),
+      data,
+    }))
+  } catch (_) {}
+}
+
+function readRecommendationSnapshot() {
+  if (!currentUser) return null
+  try {
+    const parsed = JSON.parse(localStorage.getItem(getRecommendationSnapshotKey()) || "null")
+    if (!parsed?.data) return null
+    if (Date.now() - Number(parsed.savedAt || 0) > RECOMMENDATION_SNAPSHOT_MAX_AGE) return null
+    return parsed.data
+  } catch (_) {
+    return null
+  }
+}
+
+function clearRecommendationSnapshot() {
+  try { localStorage.removeItem(getRecommendationSnapshotKey()) } catch (_) {}
+}
+
+function invalidateRecommendationClientCache() {
+  recommendationState.data = null
+  recommendationState.loadedAt = 0
+  recommendationState.renderSignature = ""
+  clearRecommendationSnapshot()
+}
+
 
 function normaliseMediaItem(item = {}) {
   return {
@@ -204,6 +260,10 @@ function normaliseMediaItem(item = {}) {
     release_year: parseInt(item.release_year) || 0,
     end_year: parseInt(item.end_year) || 0,
     number_of_seasons: parseInt(item.number_of_seasons) || 0,
+    watched_seasons: item.watched_seasons === null || item.watched_seasons === undefined || item.watched_seasons === ""
+      ? null
+      : Math.max(0, parseInt(item.watched_seasons) || 0),
+    tmdb_id: parseInt(item.tmdb_id) || null,
     rating: item.rating === null ? null : (parseFloat(item.rating) || 0),
   }
 }
@@ -243,6 +303,7 @@ function applyLocalMediaUpdate(mediaType, orderNumber, mediaData, serverItem = n
   _cacheSet(nextCollection)
   saveCollectionSnapshot(nextCollection)
   _actorVaultCandidatesCache.clear()
+  invalidateRecommendationClientCache()
   return updatedItem
 }
 
@@ -261,6 +322,7 @@ function applyLocalMediaInsert(item) {
   _cacheSet(nextCollection)
   saveCollectionSnapshot(nextCollection)
   _actorVaultCandidatesCache.clear()
+  invalidateRecommendationClientCache()
   return inserted
 }
 
@@ -275,6 +337,7 @@ function applyLocalMediaDelete(mediaType, orderNumber) {
   _cacheSet(nextCollection)
   saveCollectionSnapshot(nextCollection)
   _actorVaultCandidatesCache.clear()
+  invalidateRecommendationClientCache()
   return nextCollection
 }
 
@@ -591,13 +654,7 @@ function hydrateCollectionSnapshot() {
   const snapshot = readCollectionSnapshot()
   if (!snapshot?.length) return false
 
-  const normalised = snapshot.map(item => ({
-    ...item,
-    order_number: parseInt(item.order_number) || 0,
-    release_year: parseInt(item.release_year) || 0,
-    end_year: parseInt(item.end_year) || 0,
-    rating: parseFloat(item.rating) || 0,
-  }))
+  const normalised = snapshot.map(normaliseMediaItem)
 
   _cacheSet(normalised)
   document.body.classList.add("instant-hydrate")
@@ -657,7 +714,16 @@ async function init() {
   editBtn.addEventListener("click", editSelected)
   deleteBtn.addEventListener("click", deleteSelected)
   addForm.addEventListener("submit", addMedia)
-  mediaTypeSelect.addEventListener("change", updateEndYearVisibility)
+  mediaTypeSelect.addEventListener("change", () => {
+    updateEndYearVisibility()
+    syncAddSeriesProgressFromStatus()
+  })
+  watchStatusSelect?.addEventListener("change", syncAddSeriesProgressFromStatus)
+  editWatchStatusSelect?.addEventListener("change", () => {
+    if (editMediaTypeInput.value === "series" && editWatchStatusSelect.value === "watched" && editWatchedSeasonsInput?.value === "") {
+      editWatchedSeasonsInput.value = String(Math.max(0, parseInt(editSeasonsInput?.value) || 0))
+    }
+  })
   autoFillBtn.addEventListener("click", fetchMediaInfo)
   closeModalBtn && closeModalBtn.addEventListener("click", closeModal)
   editForm.addEventListener("submit", saveChanges)
@@ -689,6 +755,7 @@ async function init() {
   actorProfileModal?.addEventListener("click", handleActorProfileClick)
 
   initSocialUI()
+  initRecommendationsUI()
 
   // Edit modal close
   window.addEventListener("click", e => {
@@ -745,8 +812,17 @@ function updateEndYearVisibility() {
   const isSeries = mediaTypeSelect.value === "series"
   if (endYearGroup) endYearGroup.style.display = isSeries ? "flex" : "none"
   if (seasonsGroup) seasonsGroup.style.display = isSeries ? "flex" : "none"
+  if (watchedSeasonsGroup) watchedSeasonsGroup.hidden = !isSeries
   if (isSeries && seasonsInput && !seasonsInput.value) seasonsInput.value = "1"
   if (!isSeries && seasonsInput) seasonsInput.value = ""
+  if (!isSeries && watchedSeasonsInput) watchedSeasonsInput.value = ""
+}
+
+function syncAddSeriesProgressFromStatus() {
+  if (mediaTypeSelect.value !== "series" || !watchedSeasonsInput) return
+  if (watchStatusSelect?.value === "watched" && watchedSeasonsInput.value === "") {
+    watchedSeasonsInput.value = String(Math.max(0, parseInt(seasonsInput?.value) || 0))
+  }
 }
 
 function toggleSelectAll() {
@@ -2076,16 +2152,19 @@ function updateStats(results) {
 // ════════════════════════════════════════════════
 
 // ── Fetch full TMDB details (overview, cast, trailer, runtime) ──
-async function fetchTMDBDetails(title, year, mediaType) {
+async function fetchTMDBDetails(title, year, mediaType, knownTmdbId = null) {
   try {
     const endpoint = mediaType === "movie" ? "movie" : "tv"
-    const yearParam = mediaType === "movie" ? `&year=${year}` : `&first_air_date_year=${year}`
-    const searchRes = await fetch(
-      `${TMDB_BASE_URL}/search/${endpoint}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(title)}${yearParam}`
-    )
-    const searchData = await searchRes.json()
-    if (!searchData.results?.length) return null
-    const id = searchData.results[0].id
+    let id = Number(knownTmdbId) || 0
+    if (!id) {
+      const yearParam = mediaType === "movie" ? `&year=${year}` : `&first_air_date_year=${year}`
+      const searchRes = await fetch(
+        `${TMDB_BASE_URL}/search/${endpoint}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(title)}${yearParam}`
+      )
+      const searchData = await searchRes.json()
+      if (!searchData.results?.length) return null
+      id = searchData.results[0].id
+    }
     const detRes = await fetch(
       `${TMDB_BASE_URL}/${endpoint}/${id}?api_key=${TMDB_API_KEY}&append_to_response=credits,videos`
     )
@@ -2098,6 +2177,7 @@ function showDetailModal(item) {
   if (!overlay) return
   const detailSerial = ++detailRequestSerial
   const readOnlySharedTitle = Boolean(item.__shared_read_only)
+  const readOnlyRecommendation = Boolean(item.__recommendation_read_only)
   const hasRatingValue = item.rating !== null && item.rating !== undefined && item.rating !== ""
   // Personal vault titles always show their local rating. Shared titles only show it
   // when the owner allowed the rating value to be included in the shared payload.
@@ -2134,10 +2214,18 @@ function showDetailModal(item) {
   const savedSeasons = item.media_type === "series" && Number(item.number_of_seasons) > 0
     ? Number(item.number_of_seasons)
     : 0
+  const watchedSeasons = item.media_type === "series" && item.watched_seasons !== null && item.watched_seasons !== undefined
+    ? Math.max(0, Number(item.watched_seasons) || 0)
+    : null
+  const detailYear = item.display_year || item.release_year || "—"
+  const orderChip = Number(item.order_number) > 0
+    ? `<span class="meta-chip"><i class="fas fa-hashtag"></i> #${item.order_number}</span>`
+    : ""
   document.getElementById("detail-meta").innerHTML = `
-    <span class="meta-chip"><i class="fas fa-calendar"></i> ${item.display_year}</span>
-    <span class="meta-chip"><i class="fas fa-hashtag"></i> #${item.order_number}</span>
+    <span class="meta-chip"><i class="fas fa-calendar"></i> ${escapeHtml(String(detailYear))}</span>
+    ${orderChip}
     ${savedSeasons ? `<span class="meta-chip"><i class="fas fa-layer-group"></i> ${savedSeasons} season${savedSeasons === 1 ? "" : "s"}</span>` : ""}
+    ${watchedSeasons !== null ? `<span class="meta-chip meta-chip-progress"><i class="fas fa-route"></i> ${watchedSeasons}${savedSeasons ? `/${savedSeasons}` : ""} watched</span>` : ""}
   `
 
   // Stars
@@ -2165,13 +2253,26 @@ function showDetailModal(item) {
     extraEl.innerHTML = `<div class="det-extra-loading"><i class="fas fa-spinner fa-spin"></i> Loading details…</div>`
   }
 
-  // Edit button is hidden for titles opened from a friend's read-only vault.
+  // Shared titles are read-only. Recommendation details can be added directly to the vault.
   const detailEditButton = document.getElementById("detail-edit-btn")
   if (detailEditButton) {
-    detailEditButton.style.display = readOnlySharedTitle ? "none" : "inline-flex"
-    detailEditButton.onclick = readOnlySharedTitle ? null : () => {
-      closeDetailModal()
-      setTimeout(() => editItemDirectly(item), 200)
+    if (readOnlySharedTitle) {
+      detailEditButton.style.display = "none"
+      detailEditButton.onclick = null
+    } else if (readOnlyRecommendation) {
+      detailEditButton.style.display = "inline-flex"
+      detailEditButton.innerHTML = '<i class="fas fa-plus"></i> Add to Vault'
+      detailEditButton.onclick = () => {
+        closeDetailModal()
+        setTimeout(() => prefillRecommendation(item.__recommendation_data || item), 120)
+      }
+    } else {
+      detailEditButton.style.display = "inline-flex"
+      detailEditButton.innerHTML = '<i class="fas fa-pen"></i> Edit Title'
+      detailEditButton.onclick = () => {
+        closeDetailModal()
+        setTimeout(() => editItemDirectly(item), 200)
+      }
     }
   }
 
@@ -2230,7 +2331,7 @@ function showDetailModal(item) {
   document.addEventListener("keydown", handleDetEscape)
 
   // Async: fetch TMDB extra info
-  fetchTMDBDetails(item.title, item.release_year, item.media_type).then(tmdb => {
+  fetchTMDBDetails(item.title, item.release_year, item.media_type, item.tmdb_id).then(tmdb => {
     if (detailSerial !== detailRequestSerial || overlay.style.display !== "flex") return
     if (!tmdb || !extraEl) return
 
@@ -2928,25 +3029,410 @@ function editItemDirectly(item) {
   openEditModalForItem(item)
 }
 
+
+// ════════════════════════════════════════════════
+//  PERSONALIZED "FOR YOU" RECOMMENDATIONS
+// ════════════════════════════════════════════════
+
+const RECOMMENDATION_SECTIONS = {
+  continue_story: {
+    sectionId: "rec-section-continue",
+    gridId: "rec-grid-continue",
+    countId: "rec-count-continue",
+  },
+  from_vault: {
+    sectionId: "rec-section-vault",
+    gridId: "rec-grid-vault",
+    countId: "rec-count-vault",
+  },
+  new_releases: {
+    sectionId: "rec-section-new",
+    gridId: "rec-grid-new",
+    countId: "rec-count-new",
+  },
+  because_you_watched: {
+    sectionId: "rec-section-because",
+    gridId: "rec-grid-because",
+    countId: "rec-count-because",
+  },
+}
+
+function recommendationItemKey(item) {
+  return `${item.media_type}:${item.tmdb_id}`
+}
+
+function recommendationPayloadSignature(data) {
+  const sections = data?.sections || {}
+  return JSON.stringify(Object.fromEntries(
+    Object.keys(RECOMMENDATION_SECTIONS).map(key => [
+      key,
+      (sections[key] || []).map(item => [
+        item.media_type,
+        item.tmdb_id,
+        item.score,
+        item.vault_order_number,
+        item.progress?.watched_seasons,
+        item.progress?.aired_seasons,
+      ])
+    ])
+  ))
+}
+
+function setRecommendationsLoading(show) {
+  const loading = document.getElementById("recommendations-loading")
+  if (loading) loading.hidden = !show
+}
+
+function hideRecommendationMessages() {
+  const error = document.getElementById("recommendations-error")
+  const empty = document.getElementById("recommendations-empty")
+  if (error) error.hidden = true
+  if (empty) empty.hidden = true
+}
+
+function formatRecommendationUpdatedAt(value) {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return "Updated recently"
+  const now = Date.now()
+  const diffMinutes = Math.max(0, Math.round((now - date.getTime()) / 60000))
+  if (diffMinutes < 1) return "Updated just now"
+  if (diffMinutes < 60) return `Updated ${diffMinutes}m ago`
+  const hours = Math.round(diffMinutes / 60)
+  if (hours < 24) return `Updated ${hours}h ago`
+  return `Updated ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+}
+
+function recommendationReasonIcon(type) {
+  if (type === "new_season") return "fa-layer-group"
+  if (type === "franchise_next") return "fa-forward-step"
+  if (type === "because_watched") return "fa-link"
+  return "fa-wand-magic-sparkles"
+}
+
+function buildRecommendationCard(item) {
+  const article = document.createElement("article")
+  article.className = `recommendation-card${item.in_vault ? " is-in-vault" : ""}`
+  article.dataset.recKey = recommendationItemKey(item)
+
+  const typeLabel = item.media_type === "movie" ? "Movie" : "Series"
+  const year = item.release_year || "—"
+  const rating = Number(item.tmdb_rating) > 0 ? Number(item.tmdb_rating).toFixed(1) : "—"
+  const reason = item.primary_reason || item.reasons?.[0] || "Picked for you"
+  const reasonType = item.primary_reason_type || item.reason_types?.[0] || "related"
+  const genres = Array.isArray(item.genres) && item.genres.length
+    ? item.genres.slice(0, 3).map(genre => `<span>${escapeHtml(genre)}</span>`).join("")
+    : ""
+  const progress = item.progress
+  const progressHtml = progress
+    ? `<div class="rec-progress">
+        <div class="rec-progress-copy">
+          <span>Series progress</span>
+          <b>${Number(progress.watched_seasons) || 0}/${Number(progress.aired_seasons) || 0} seasons</b>
+        </div>
+        <div class="rec-progress-track"><i style="width:${Math.min(100, Math.max(0, ((Number(progress.watched_seasons) || 0) / Math.max(1, Number(progress.aired_seasons) || 1)) * 100))}%"></i></div>
+        <small>Next: Season ${Number(progress.next_season) || (Number(progress.watched_seasons) || 0) + 1}</small>
+      </div>`
+    : ""
+
+  const posterHtml = item.poster_url
+    ? `<img src="${escapeHtml(item.poster_url)}" alt="${escapeHtml(item.title)} poster" loading="lazy" decoding="async" />`
+    : `<div class="rec-poster-placeholder"><i class="fas fa-photo-film"></i></div>`
+
+  article.innerHTML = `
+    <button type="button" class="rec-card-main" data-rec-action="open" aria-label="Open ${escapeHtml(item.title)}">
+      <div class="rec-card-poster">
+        ${posterHtml}
+        <span class="rec-match-badge"><i class="fas fa-bullseye"></i> ${Number(item.match_score) || 0}%</span>
+        ${item.in_vault ? `<span class="rec-vault-badge"><i class="fas fa-vault"></i> In vault</span>` : ""}
+      </div>
+      <div class="rec-card-body">
+        <div class="rec-card-topline">
+          <span>${escapeHtml(typeLabel)}</span><i></i><span>${escapeHtml(String(year))}</span><i></i><span><i class="fas fa-star"></i> ${escapeHtml(String(rating))}</span>
+        </div>
+        <h3>${escapeHtml(item.title || "Untitled")}</h3>
+        <div class="rec-genre-row">${genres}</div>
+        <p class="rec-reason"><i class="fas ${recommendationReasonIcon(reasonType)}"></i>${escapeHtml(reason)}</p>
+        ${progressHtml}
+      </div>
+    </button>
+    <div class="rec-card-actions">
+      <button type="button" class="rec-secondary-action" data-rec-action="open">
+        <i class="fas fa-circle-info"></i> Details
+      </button>
+      ${item.in_vault
+        ? `<button type="button" class="rec-primary-action" data-rec-action="vault"><i class="fas fa-arrow-up-right-from-square"></i> Open in vault</button>`
+        : `<button type="button" class="rec-primary-action" data-rec-action="add"><i class="fas fa-plus"></i> Add to vault</button>`}
+    </div>
+  `
+  return article
+}
+
+function renderRecommendationSection(sectionKey, items = []) {
+  const config = RECOMMENDATION_SECTIONS[sectionKey]
+  if (!config) return
+  const section = document.getElementById(config.sectionId)
+  const grid = document.getElementById(config.gridId)
+  const count = document.getElementById(config.countId)
+  if (!section || !grid) return
+
+  grid.innerHTML = ""
+  section.hidden = !items.length
+  if (count) count.textContent = items.length
+  if (!items.length) return
+
+  const fragment = document.createDocumentFragment()
+  for (const item of items) {
+    recommendationState.itemMap.set(recommendationItemKey(item), item)
+    fragment.appendChild(buildRecommendationCard(item))
+  }
+  grid.appendChild(fragment)
+}
+
+function renderRecommendations(data, { force = false } = {}) {
+  if (!data) return
+  const signature = recommendationPayloadSignature(data)
+  if (!force && signature === recommendationState.renderSignature) {
+    recommendationState.data = data
+    return
+  }
+
+  recommendationState.data = data
+  recommendationState.renderSignature = signature
+  recommendationState.itemMap.clear()
+
+  setRecommendationsLoading(false)
+  hideRecommendationMessages()
+
+  const content = document.getElementById("recommendations-content")
+  const profile = data.profile || {}
+  const watchedEl = document.getElementById("rec-profile-watched")
+  const vaultEl = document.getElementById("rec-profile-vault")
+  const progressEl = document.getElementById("rec-profile-progress")
+  const updatedEl = document.getElementById("recommendations-updated-label")
+  if (watchedEl) watchedEl.textContent = Number(profile.watched_count) || 0
+  if (vaultEl) vaultEl.textContent = Number(profile.vault_total) || 0
+  if (progressEl) progressEl.textContent = Number(profile.tracked_series_progress) || 0
+  if (updatedEl) updatedEl.textContent = formatRecommendationUpdatedAt(data.generated_at)
+
+  const sections = data.sections || {}
+  let total = 0
+  for (const key of Object.keys(RECOMMENDATION_SECTIONS)) {
+    const items = Array.isArray(sections[key]) ? sections[key] : []
+    total += items.length
+    renderRecommendationSection(key, items)
+  }
+
+  if (content) content.hidden = total === 0
+  const empty = document.getElementById("recommendations-empty")
+  if (empty) empty.hidden = total !== 0
+}
+
+function getVaultItemForRecommendation(item) {
+  const source = Array.isArray(_cache.data) && _cache.data.length
+    ? _cache.data
+    : (readCollectionSnapshot() || [])
+  const order = Number(item.vault_order_number)
+  const tmdbId = Number(item.tmdb_id)
+  return source.find(media => (
+    media.media_type === item.media_type &&
+    (
+      (order > 0 && Number(media.order_number) === order) ||
+      (tmdbId > 0 && Number(media.tmdb_id) === tmdbId)
+    )
+  )) || null
+}
+
+function openRecommendationItem(item) {
+  if (!item) return
+  const vaultItem = item.in_vault ? getVaultItemForRecommendation(item) : null
+  if (vaultItem) {
+    const [displayItem] = prepareDisplayResults([normaliseMediaItem(vaultItem)])
+    showDetailModal(displayItem || vaultItem)
+    return
+  }
+
+  showDetailModal({
+    title: item.title,
+    media_type: item.media_type,
+    release_year: Number(item.release_year) || "",
+    display_year: item.release_year ? String(item.release_year) : "—",
+    rating: Number(item.tmdb_rating) || 0,
+    poster_url: item.poster_url || null,
+    genre: (item.genres || []).join(", "),
+    order_number: 0,
+    number_of_seasons: item.progress?.aired_seasons || 0,
+    watched_seasons: null,
+    __recommendation_read_only: true,
+    __recommendation_data: item,
+  })
+}
+
+function prefillRecommendation(item) {
+  if (!item) return
+  switchView("add")
+  mediaTypeSelect.value = item.media_type === "series" ? "series" : "movie"
+  updateEndYearVisibility()
+  titleInput.value = item.title || ""
+  releaseYearInput.value = item.release_year || ""
+  genreInput.value = Array.isArray(item.genres) ? item.genres.join(", ") : ""
+  ratingInput.value = Number(item.tmdb_rating) > 0 ? Number(item.tmdb_rating).toFixed(1) : ""
+  if (tmdbIdInput) tmdbIdInput.value = item.tmdb_id || ""
+  if (watchStatusSelect) watchStatusSelect.value = "plan_to_watch"
+  if (watchedSeasonsInput) watchedSeasonsInput.value = ""
+
+  if (item.poster_url) {
+    posterImage.src = item.poster_url
+    syncPosterPreview(posterImage, posterPlaceholder, removePosterBtn)
+  } else {
+    posterImage.removeAttribute("src")
+    syncPosterPreview(posterImage, posterPlaceholder, removePosterBtn)
+  }
+
+  document.querySelector("#view-add .personal-section")?.classList.add("personal-section--open")
+  showToast(`"${item.title}" is ready to add — details are being filled in`, "success")
+  window.setTimeout(() => {
+    if (titleInput.value.trim() === String(item.title || "").trim()) void fetchMediaInfo()
+  }, 80)
+}
+
+function openRecommendationVaultItem(item) {
+  const vaultItem = getVaultItemForRecommendation(item)
+  if (!vaultItem) {
+    showToast("This title is not available in your local vault snapshot yet", "info")
+    return
+  }
+  switchView("collection")
+  window.setTimeout(() => {
+    const [displayItem] = prepareDisplayResults([normaliseMediaItem(vaultItem)])
+    showDetailModal(displayItem || vaultItem)
+  }, 80)
+}
+
+function handleRecommendationClick(event) {
+  const actionButton = event.target.closest("[data-rec-action]")
+  const card = event.target.closest(".recommendation-card")
+  if (!actionButton || !card) return
+  const item = recommendationState.itemMap.get(card.dataset.recKey)
+  if (!item) return
+
+  const action = actionButton.dataset.recAction
+  if (action === "add") prefillRecommendation(item)
+  else if (action === "vault") openRecommendationVaultItem(item)
+  else openRecommendationItem(item)
+}
+
+async function loadRecommendations({ force = false, background = false } = {}) {
+  if (!currentUser) {
+    openAuthModal("login")
+    return
+  }
+  if (recommendationState.loading && !force) return
+
+  const now = Date.now()
+  if (!force && recommendationState.data && now - recommendationState.loadedAt < 5 * 60_000) {
+    renderRecommendations(recommendationState.data)
+    return
+  }
+
+  if (!recommendationState.data) {
+    const snapshot = readRecommendationSnapshot()
+    if (snapshot) {
+      recommendationState.data = snapshot
+      recommendationState.loadedAt = now - 10 * 60_000
+      renderRecommendations(snapshot, { force: true })
+      background = true
+    }
+  }
+
+  const serial = ++recommendationState.requestSerial
+  recommendationState.loading = true
+  const refreshBtn = document.getElementById("recommendations-refresh-btn")
+  if (refreshBtn) {
+    refreshBtn.disabled = true
+    refreshBtn.classList.add("is-loading")
+  }
+
+  let loadingTimer = null
+  if (!background && !recommendationState.data) {
+    loadingTimer = window.setTimeout(() => setRecommendationsLoading(true), 450)
+  }
+
+  try {
+    const url = `${RECOMMENDATIONS_BASE_URL}${force ? "?refresh=1" : ""}`
+    const response = await fetch(url, { headers: authHeaders() })
+    if (serial !== recommendationState.requestSerial) return
+    if (response.status === 401) {
+      handleUnauthorized()
+      return
+    }
+    if (!response.ok) throw new Error(`Recommendation service returned ${response.status}`)
+    const data = await response.json()
+    if (data?.error) throw new Error(data.error)
+
+    recommendationState.data = data
+    recommendationState.loadedAt = Date.now()
+    saveRecommendationSnapshot(data)
+    renderRecommendations(data, { force })
+  } catch (error) {
+    if (serial !== recommendationState.requestSerial) return
+    console.error("Recommendation loading failed:", error)
+    if (!recommendationState.data) {
+      const errorBox = document.getElementById("recommendations-error")
+      const errorMessage = document.getElementById("recommendations-error-message")
+      const content = document.getElementById("recommendations-content")
+      if (errorBox) errorBox.hidden = false
+      if (errorMessage) errorMessage.textContent = "The recommendation engine could not connect right now. Your collection is unaffected."
+      if (content) content.hidden = true
+    } else if (force) {
+      showToast("Could not refresh picks — keeping your last recommendations", "info")
+    }
+  } finally {
+    if (loadingTimer) window.clearTimeout(loadingTimer)
+    if (serial === recommendationState.requestSerial) {
+      recommendationState.loading = false
+      setRecommendationsLoading(false)
+      if (refreshBtn) {
+        refreshBtn.disabled = false
+        refreshBtn.classList.remove("is-loading")
+      }
+    }
+  }
+}
+
+function initRecommendationsUI() {
+  document.getElementById("recommendations-refresh-btn")?.addEventListener("click", () => {
+    void loadRecommendations({ force: true })
+  })
+  document.getElementById("view-for-you")?.addEventListener("click", handleRecommendationClick)
+}
+window.loadRecommendations = loadRecommendations
+
 // ════════════════════════════════════════════════
 //  VIEW SWITCHING
 // ════════════════════════════════════════════════
 
 function switchView(view) {
-  // Guests can't add media or open private social features.
-  if ((view === "add" || view === "social") && !currentUser) {
+  // Guests can't add media or open private personalized/social features.
+  if ((view === "add" || view === "social" || view === "for-you") && !currentUser) {
     openAuthModal("login")
-    showToast(view === "social" ? "Please sign in to connect with friends" : "Please sign in to add titles to your vault", "info")
+    const message = view === "social"
+      ? "Please sign in to connect with friends"
+      : view === "for-you"
+        ? "Please sign in to build recommendations from your watch history"
+        : "Please sign in to add titles to your vault"
+    showToast(message, "info")
     return
   }
 
   const views = {
     collection: document.getElementById("view-collection"),
+    "for-you": document.getElementById("view-for-you"),
     add: document.getElementById("view-add"),
     social: document.getElementById("view-social"),
   }
   const navs = {
     collection: document.getElementById("nav-collection"),
+    "for-you": document.getElementById("nav-for-you"),
     add: document.getElementById("nav-add"),
     social: document.getElementById("nav-social"),
   }
@@ -2960,6 +3446,9 @@ function switchView(view) {
 
   if (view === "add") {
     views.add?.querySelector(".personal-section")?.classList.remove("personal-section--open")
+  }
+  if (view === "for-you") {
+    void loadRecommendations()
   }
   if (view === "social") {
     closeFriendVault({ silent: true })
@@ -3090,6 +3579,7 @@ async function addMedia(e) {
       release_year: releaseYear,
       rating,
       poster_url: isDisplayablePosterSource(posterImage.src) ? posterImage.src : null,
+      tmdb_id: parseInt(tmdbIdInput?.value) || null,
       // Personal fields (optional)
       notes:         notesInput?.value.trim()        || null,
       watch_status:  watchStatusSelect?.value        || null,
@@ -3108,6 +3598,19 @@ async function addMedia(e) {
         return
       }
       newMedia.number_of_seasons = numberOfSeasons
+      const rawWatchedSeasons = watchedSeasonsInput?.value?.trim()
+      if (rawWatchedSeasons !== "") {
+        const watchedSeasons = parseInt(rawWatchedSeasons)
+        if (!Number.isInteger(watchedSeasons) || watchedSeasons < 0) {
+          showToast("Seasons watched must be a whole number of 0 or more", "error")
+          return
+        }
+        newMedia.watched_seasons = watchedSeasons
+      } else if (watchStatusSelect?.value === "watched") {
+        newMedia.watched_seasons = numberOfSeasons
+      } else {
+        newMedia.watched_seasons = null
+      }
     }
 
     // ── Duplicate check ──
@@ -3196,10 +3699,12 @@ async function fetchMediaInfo() {
     genreInput.value       = info.genre
     releaseYearInput.value = info.release_year
     ratingInput.value      = info.rating
+    if (tmdbIdInput) tmdbIdInput.value = info.tmdb_id || ""
 
     if (mediaType === "series") {
       if (info.end_year) endYearInput.value = info.end_year
       if (seasonsInput && info.number_of_seasons) seasonsInput.value = info.number_of_seasons
+      syncAddSeriesProgressFromStatus()
     }
 
     if (info.poster_url) {
@@ -3243,6 +3748,7 @@ async function searchMovieInfo(searchTitle) {
     }
 
     return {
+      tmdb_id:      Number(details.id) || Number(movie.id) || null,
       title:        details.title || "",
       release_year: parseInt(year) || new Date().getFullYear(),
       genre:        genres.join(", "),
@@ -3286,6 +3792,7 @@ async function searchSeriesInfo(searchTitle) {
     const parsedEnd   = endYear ? parseInt(endYear) : parsedStart
 
     return {
+      tmdb_id:      Number(details.id) || Number(serie.id) || null,
       title:        details.name || "",
       release_year: parsedStart,
       end_year:     parsedEnd,
@@ -3330,6 +3837,7 @@ function openEditModalForItem(mediaItem) {
   const mediaType = mediaItem.media_type
 
   editOrderInput.value       = orderNumber
+  if (editTmdbIdInput) editTmdbIdInput.value = mediaItem.tmdb_id || ""
   editTitleInput.value       = mediaItem.title || ""
   editGenreInput.value       = mediaItem.genre || ""
   editReleaseYearInput.value = mediaItem.release_year || ""
@@ -3339,13 +3847,22 @@ function openEditModalForItem(mediaItem) {
   if (mediaType === "series") {
     editEndYearGroup.style.display = "flex"
     editSeasonsGroup.style.display = "flex"
+    if (editWatchedSeasonsGroup) editWatchedSeasonsGroup.hidden = false
     editEndYearInput.value = mediaItem.end_year || mediaItem.release_year || ""
     editSeasonsInput.value = mediaItem.number_of_seasons || ""
+    if (editWatchedSeasonsInput) {
+      const inferredProgress = mediaItem.watched_seasons !== null && mediaItem.watched_seasons !== undefined
+        ? mediaItem.watched_seasons
+        : (mediaItem.watch_status === "watched" ? (mediaItem.number_of_seasons || "") : "")
+      editWatchedSeasonsInput.value = inferredProgress
+    }
   } else {
     editEndYearGroup.style.display = "none"
     editSeasonsGroup.style.display = "none"
+    if (editWatchedSeasonsGroup) editWatchedSeasonsGroup.hidden = true
     editEndYearInput.value = ""
     editSeasonsInput.value = ""
+    if (editWatchedSeasonsInput) editWatchedSeasonsInput.value = ""
   }
 
   if (mediaItem.poster_url) {
@@ -3366,7 +3883,8 @@ function openEditModalForItem(mediaItem) {
 
   const personalSection = editModal?.querySelector(".personal-section")
   const hasPersonal = Boolean(
-    mediaItem.watch_status || mediaItem.notes || mediaItem.favorite || mediaItem.watch_date
+    mediaItem.watch_status || mediaItem.notes || mediaItem.favorite || mediaItem.watch_date ||
+    (mediaItem.media_type === "series" && mediaItem.watched_seasons !== null && mediaItem.watched_seasons !== undefined)
   )
   personalSection?.classList.toggle("personal-section--open", hasPersonal)
 
@@ -3425,6 +3943,7 @@ async function fetchEditInfo() {
     editGenreInput.value       = info.genre
     editReleaseYearInput.value = info.release_year
     editRatingInput.value      = info.rating
+    if (editTmdbIdInput) editTmdbIdInput.value = info.tmdb_id || ""
 
     if (mediaType === "series") {
       if (info.end_year) editEndYearInput.value = info.end_year
@@ -3467,6 +3986,7 @@ async function saveChanges(e) {
       release_year: releaseYear,
       rating,
       poster_url: editPosterImage.style.display === "block" ? editPosterImage.src : null,
+      tmdb_id: parseInt(editTmdbIdInput?.value) || null,
       notes:         editNotesInput?.value.trim()        || null,
       watch_status:  editWatchStatusSelect?.value        || null,
       watch_date:    editWatchDateInput?.value           || null,
@@ -3484,6 +4004,19 @@ async function saveChanges(e) {
         return
       }
       updatedMedia.number_of_seasons = numberOfSeasons
+      const rawWatchedSeasons = editWatchedSeasonsInput?.value?.trim()
+      if (rawWatchedSeasons !== "") {
+        const watchedSeasons = parseInt(rawWatchedSeasons)
+        if (!Number.isInteger(watchedSeasons) || watchedSeasons < 0) {
+          showToast("Seasons watched must be a whole number of 0 or more", "error")
+          return
+        }
+        updatedMedia.watched_seasons = watchedSeasons
+      } else if (editWatchStatusSelect?.value === "watched") {
+        updatedMedia.watched_seasons = numberOfSeasons
+      } else {
+        updatedMedia.watched_seasons = null
+      }
     }
 
     if (saveButton) {
@@ -3651,6 +4184,7 @@ function updateAuthUI(user) {
   const userLabel = document.getElementById("user-name-label")
   const guestBanner = document.getElementById("guest-banner")
   const navAdd = document.getElementById("nav-add")
+  const navForYou = document.getElementById("nav-for-you")
   const navSocial = document.getElementById("nav-social")
 
   if (user) {
@@ -3660,12 +4194,14 @@ function updateAuthUI(user) {
     if (userLabel) userLabel.textContent = `@${user.username}`
     if (guestBanner) guestBanner.style.display = "none"
     if (navAdd) navAdd.style.opacity = "1"
+    if (navForYou) navForYou.style.opacity = "1"
     if (navSocial) navSocial.style.opacity = "1"
   } else {
     if (guestBtn) guestBtn.style.display = "flex"
     if (userPill) userPill.style.display = "none"
     if (guestBanner) guestBanner.style.display = "flex"
     if (navAdd) navAdd.style.opacity = "0.5"
+    if (navForYou) navForYou.style.opacity = "0.5"
     if (navSocial) navSocial.style.opacity = "0.5"
     updateSocialRequestBadge(0)
   }
