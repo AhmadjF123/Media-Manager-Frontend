@@ -7389,3 +7389,7 @@ html[data-theme="light"] body .rec-search-result-stats span { background: rgba(2
   .rec-smart-search-chips::-webkit-scrollbar { display: none; }
   .rec-smart-search-chips button { white-space: nowrap; }
 }
+
+/* Universe search keeps an exact hidden release timeline for ordering. */
+#rec-toolbar .rec-sort-control[hidden] { display: none !important; }
+#rec-toolbar.is-universe-search { grid-template-columns: 1fr auto; }

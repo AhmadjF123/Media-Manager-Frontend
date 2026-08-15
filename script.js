@@ -3521,6 +3521,37 @@ function filterUniverseSearchItems(items) {
   })
 }
 
+// Universe searches use a true release timeline: year -> month -> day, oldest first.
+// The exact date is intentionally not printed on the cards; it only controls order.
+function universeReleaseTimelineValue(item) {
+  const raw = String(item?.release_date || "").trim()
+  const exact = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? Date.parse(`${raw}T00:00:00Z`) : NaN
+  if (Number.isFinite(exact)) return exact
+
+  const year = Number(item?.release_year) || 0
+  // Missing dates stay after fully dated titles while preserving a sensible year fallback.
+  return year > 0 ? Date.UTC(year, 11, 31, 23, 59, 59, 999) : Number.MAX_SAFE_INTEGER
+}
+
+function sortUniverseSearchByReleaseTimeline(items) {
+  return [...items].sort((a, b) => {
+    const dateDiff = universeReleaseTimelineValue(a) - universeReleaseTimelineValue(b)
+    if (dateDiff) return dateDiff
+
+    // Stable deterministic tie-breakers for same-day releases.
+    const typeDiff = String(a.media_type || "").localeCompare(String(b.media_type || ""))
+    if (typeDiff) return typeDiff
+    return String(a.title || "").localeCompare(String(b.title || ""))
+  })
+}
+
+function syncUniverseSearchToolbarMode(active) {
+  const sortControl = document.querySelector("#rec-toolbar .rec-sort-control")
+  if (sortControl) sortControl.hidden = Boolean(active)
+  const toolbar = document.getElementById("rec-toolbar")
+  if (toolbar) toolbar.classList.toggle("is-universe-search", Boolean(active))
+}
+
 function renderUniverseSearchResults(data) {
   if (!data || !recommendationState.searchQuery) return
   recommendationState.searchData = data
@@ -3540,7 +3571,8 @@ function renderUniverseSearchResults(data) {
   if (!section || !grid) return
 
   const filtered = filterUniverseSearchItems(data.results || [])
-  const sorted = sortRecommendationClientItems(filtered)
+  const sorted = sortUniverseSearchByReleaseTimeline(filtered)
+  syncUniverseSearchToolbarMode(true)
   grid.innerHTML = ""
   const fragment = document.createDocumentFragment()
   for (const item of sorted) {
@@ -3593,6 +3625,7 @@ async function runUniverseSearch(query, { force = false } = {}) {
   if (cleanQuery.length < 2) {
     recommendationState.searchData = null
     recommendationState.itemMap.clear()
+    syncUniverseSearchToolbarMode(false)
     const searchSection = document.getElementById("rec-section-search")
     if (searchSection) searchSection.hidden = true
     updateUniverseSearchStatus("Fast search across connected studios, keywords and your vault graph.")
@@ -3664,6 +3697,7 @@ function scheduleUniverseSearch(query) {
 }
 
 function clearUniverseSearch() {
+  syncUniverseSearchToolbarMode(false)
   if (recommendationState.searchDebounceTimer) window.clearTimeout(recommendationState.searchDebounceTimer)
   recommendationState.searchDebounceTimer = null
   recommendationState.searchRequestSerial += 1
@@ -3681,6 +3715,7 @@ function clearUniverseSearch() {
 
 function renderRecommendations(data, { force = false } = {}) {
   if (!data) return
+  syncUniverseSearchToolbarMode(false)
   if (recommendationState.searchQuery) {
     recommendationState.data = data
     if (recommendationState.searchData) renderUniverseSearchResults(recommendationState.searchData)
