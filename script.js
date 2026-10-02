@@ -733,6 +733,11 @@ async function init() {
     }
   })
   autoFillBtn.addEventListener("click", fetchMediaInfo)
+  titleInput.addEventListener("keydown", event => {
+    if (event.key !== "Enter" || event.isComposing) return
+    event.preventDefault()
+    fetchMediaInfo()
+  })
   closeModalBtn && closeModalBtn.addEventListener("click", closeModal)
   editForm.addEventListener("submit", saveChanges)
   editAutoFillBtn.addEventListener("click", fetchEditInfo)
@@ -3834,7 +3839,7 @@ function prefillRecommendation(item) {
   document.querySelector("#view-add .personal-section")?.classList.add("personal-section--open")
   showToast(`"${item.title}" is ready to add — details are being filled in`, "success")
   window.setTimeout(() => {
-    if (titleInput.value.trim() === String(item.title || "").trim()) void fetchMediaInfo()
+    if (titleInput.value.trim() === String(item.title || "").trim()) void fetchMediaInfo(item.tmdb_id || null)
   }, 80)
 }
 
@@ -4270,47 +4275,385 @@ function normalizeMediaSearchTitle(value) {
     .trim()
 }
 
-async function fetchMediaInfo() {
+// Keep the user's exact cleaned title first, then add a conservative fallback for
+// copied release/file names such as "Dune 2021 1080p BluRay".
+function buildAutoFillSearchQueries(value) {
+  const primary = normalizeMediaSearchTitle(value)
+  if (!primary) return []
+
+  const fallback = primary
+    .replace(/[\[\{][^\]\}]*[\]\}]/g, " ")
+    .replace(/\((?:19|20)\d{2}\)/g, " ")
+    .replace(/\b(19\d{2}|20\d{2})\b(?!.*\b(?:19\d{2}|20\d{2})\b)/, " ")
+    .replace(/\bS\d{1,2}E\d{1,3}\b/gi, " ")
+    .replace(/\bseason\s+\d+\b/gi, " ")
+    .split(/\s+/)
+    .filter(token => !/^(?:2160p|1080p|720p|480p|4k|uhd|hdr|dv|bluray|brrip|webrip|web-?dl|webdl|hdtv|dvdrip|hdrip|remux|x264|x265|h264|h265|hevc|aac\d*|dts|proper|repack)$/i.test(token))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  return [...new Set([primary, fallback].filter(Boolean))]
+}
+
+function normalizeAutoFillMatchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function getAutoFillCandidateTitle(candidate, mediaType) {
+  return mediaType === "movie" ? (candidate.title || candidate.original_title || "") : (candidate.name || candidate.original_name || "")
+}
+
+function getAutoFillCandidateYear(candidate, mediaType) {
+  const rawDate = mediaType === "movie" ? candidate.release_date : candidate.first_air_date
+  return rawDate ? parseInt(String(rawDate).slice(0, 4)) || null : null
+}
+
+function scoreAutoFillCandidate(candidate, searchTitle, mediaType, preferredYear = null) {
+  const query = normalizeAutoFillMatchText(searchTitle)
+  const titles = mediaType === "movie"
+    ? [candidate.title, candidate.original_title]
+    : [candidate.name, candidate.original_name]
+  const normalizedTitles = [...new Set(titles.map(normalizeAutoFillMatchText).filter(Boolean))]
+  const queryTokens = query.split(" ").filter(Boolean)
+
+  let score = 0
+  for (const title of normalizedTitles) {
+    if (title === query) score = Math.max(score, 10000)
+    else if (title.startsWith(query) || query.startsWith(title)) score = Math.max(score, 7000)
+    else if (title.includes(query) || query.includes(title)) score = Math.max(score, 5000)
+    else if (queryTokens.length && queryTokens.every(token => title.includes(token))) score = Math.max(score, 3500)
+  }
+
+  const year = getAutoFillCandidateYear(candidate, mediaType)
+  if (preferredYear && year === preferredYear) score += 900
+  score += Math.min(500, Math.log10(Math.max(1, Number(candidate.popularity) || 0) + 1) * 120)
+  score += Math.min(350, Math.log10(Math.max(1, Number(candidate.vote_count) || 0) + 1) * 80)
+  return score
+}
+
+async function fetchAutoFillSearchPage(query, mediaType) {
+  const endpoint = mediaType === "movie" ? "movie" : "tv"
+  const url = `${TMDB_BASE_URL}/search/${endpoint}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&language=en-US&include_adult=false&page=1`
+  const response = await fetch(url)
+  if (!response.ok) throw new Error(`TMDB search failed (${response.status})`)
+  const data = await response.json()
+  return Array.isArray(data.results) ? data.results : []
+}
+
+async function searchAutoFillCandidates(searchTitle, preferredMediaType) {
+  const queries = buildAutoFillSearchQueries(searchTitle)
+  if (!queries.length) return []
+
+  const preferredYearMatch = String(searchTitle || "").match(/\b(19\d{2}|20\d{2})\b/)
+  const preferredYear = preferredYearMatch ? parseInt(preferredYearMatch[1]) : null
+  const mediaTypes = preferredMediaType === "series" ? ["series", "movie"] : ["movie", "series"]
+  const searches = queries.flatMap(query => mediaTypes.map(mediaType => ({ query, mediaType })))
+  const settledSearches = await Promise.allSettled(searches.map(async search => ({
+    ...search,
+    results: await fetchAutoFillSearchPage(search.query, search.mediaType),
+  })))
+  const resultGroups = settledSearches
+    .filter(result => result.status === "fulfilled")
+    .map(result => result.value)
+
+  if (!resultGroups.length) {
+    const firstError = settledSearches.find(result => result.status === "rejected")
+    throw firstError?.reason || new Error("TMDB search failed")
+  }
+
+  const deduped = new Map()
+
+  resultGroups.forEach(group => {
+    group.results.forEach(candidate => {
+      const id = Number(candidate?.id)
+      const key = `${group.mediaType}:${id}`
+      if (!id || deduped.has(key)) return
+      deduped.set(key, { ...candidate, _autoFillMediaType: group.mediaType })
+    })
+  })
+
+  const matchQuery = queries[queries.length - 1]
+  return [...deduped.values()]
+    .map(candidate => ({
+      ...candidate,
+      _autoFillScore:
+        scoreAutoFillCandidate(candidate, matchQuery, candidate._autoFillMediaType, preferredYear) +
+        (candidate._autoFillMediaType === preferredMediaType ? 40 : 0),
+    }))
+    .sort((a, b) => {
+      if (b._autoFillScore !== a._autoFillScore) return b._autoFillScore - a._autoFillScore
+      return (Number(b.popularity) || 0) - (Number(a.popularity) || 0)
+    })
+}
+
+function ensureAutoFillResultsModal() {
+  let modal = document.getElementById("auto-fill-results-modal")
+  if (modal) return modal
+
+  modal = document.createElement("div")
+  modal.id = "auto-fill-results-modal"
+  modal.className = "auto-fill-results-overlay"
+  modal.hidden = true
+  modal.innerHTML = `
+    <div class="auto-fill-results-box" role="dialog" aria-modal="true" aria-labelledby="auto-fill-results-title">
+      <div class="auto-fill-results-hdr">
+        <div>
+          <span class="auto-fill-results-kicker"><i class="fas fa-magic"></i> Auto-Fill results</span>
+          <h2 id="auto-fill-results-title">Choose the correct title</h2>
+          <p id="auto-fill-results-summary"></p>
+        </div>
+        <button type="button" class="auto-fill-results-close" aria-label="Close Auto-Fill results"><i class="fas fa-times"></i></button>
+      </div>
+      <div id="auto-fill-results-list" class="auto-fill-results-list"></div>
+    </div>`
+
+  document.body.appendChild(modal)
+  modal.querySelector(".auto-fill-results-close")?.addEventListener("click", closeAutoFillResults)
+  modal.addEventListener("click", event => {
+    if (event.target === modal) {
+      closeAutoFillResults()
+      return
+    }
+
+    const resultButton = event.target.closest("[data-auto-fill-result-index]")
+    if (!resultButton) return
+    const index = Number(resultButton.dataset.autoFillResultIndex)
+    selectAutoFillResult(index)
+  })
+
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && !modal.hidden) closeAutoFillResults()
+  })
+
+  return modal
+}
+
+let autoFillCandidates = []
+let autoFillCandidateSelectionPending = false
+let autoFillSearchRequestSerial = 0
+
+function showAutoFillResults(candidates, searchTitle) {
+  const modal = ensureAutoFillResultsModal()
+  const list = modal.querySelector("#auto-fill-results-list")
+  const summary = modal.querySelector("#auto-fill-results-summary")
+  autoFillCandidates = candidates
+  autoFillCandidateSelectionPending = false
+
+  summary.textContent = `${candidates.length} ${candidates.length === 1 ? "result" : "results"} found for “${searchTitle}”. Select the exact title you meant.`
+
+  list.innerHTML = candidates.map((candidate, index) => {
+    const candidateMediaType = candidate._autoFillMediaType === "series" ? "series" : "movie"
+    const title = getAutoFillCandidateTitle(candidate, candidateMediaType) || "Untitled"
+    const originalTitle = candidateMediaType === "movie" ? candidate.original_title : candidate.original_name
+    const year = getAutoFillCandidateYear(candidate, candidateMediaType)
+    const rating = Number(candidate.vote_average) > 0 ? Number(candidate.vote_average).toFixed(1) : "—"
+    const overview = candidate.overview || "No description available."
+    const poster = candidate.poster_path
+      ? `<img src="${TMDB_IMAGE_URL}${candidate.poster_path}" alt="" loading="lazy">`
+      : `<span class="auto-fill-result-no-poster"><i class="fas fa-photo-film"></i></span>`
+    const originalLine = originalTitle && normalizeAutoFillMatchText(originalTitle) !== normalizeAutoFillMatchText(title)
+      ? `<span class="auto-fill-result-original">${escapeHtml(originalTitle)}</span>`
+      : ""
+
+    return `
+      <button type="button" class="auto-fill-result-card" data-auto-fill-result-index="${index}">
+        <span class="auto-fill-result-poster">${poster}</span>
+        <span class="auto-fill-result-copy">
+          <span class="auto-fill-result-title-row">
+            <strong>${escapeHtml(title)}</strong>
+            <em>${year || "Year unknown"}</em>
+          </span>
+          ${originalLine}
+          <span class="auto-fill-result-overview">${escapeHtml(overview)}</span>
+          <span class="auto-fill-result-meta"><span class="auto-fill-result-type"><i class="fas ${candidateMediaType === "movie" ? "fa-film" : "fa-tv"}"></i> ${candidateMediaType === "movie" ? "Movie" : "Series"}</span><span><i class="fas fa-star"></i> ${rating} TMDB</span></span>
+        </span>
+        <span class="auto-fill-result-pick"><i class="fas fa-arrow-right"></i></span>
+      </button>`
+  }).join("")
+
+  modal.hidden = false
+  modal.dataset.previousBodyOverflow = document.body.style.overflow || ""
+  document.body.style.overflow = "hidden"
+  requestAnimationFrame(() => modal.querySelector(".auto-fill-result-card")?.focus({ preventScroll: true }))
+}
+
+function closeAutoFillResults() {
+  const modal = document.getElementById("auto-fill-results-modal")
+  if (!modal || modal.hidden) return
+  modal.hidden = true
+  document.body.style.overflow = modal.dataset.previousBodyOverflow || ""
+  autoFillCandidateSelectionPending = false
+}
+
+async function fetchMovieInfoByTmdbId(tmdbId) {
+  const detailsUrl = `${TMDB_BASE_URL}/movie/${tmdbId}?api_key=${TMDB_API_KEY}&language=en-US`
+  const detailsResponse = await fetch(detailsUrl)
+  if (!detailsResponse.ok) throw new Error(`TMDB details failed (${detailsResponse.status})`)
+  const details = await detailsResponse.json()
+
+  const year = details.release_date ? details.release_date.substring(0, 4) : ""
+  const genres = details.genres ? details.genres.map(g => g.name) : []
+  let rating = details.vote_average || 0
+
+  if (details.imdb_id) {
+    try {
+      const imdbData = await (await fetch(`https://www.omdbapi.com/?i=${details.imdb_id}&apikey=${OMDB_API_KEY}`)).json()
+      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A") rating = parseFloat(imdbData.imdbRating)
+    } catch (error) {
+      console.warn("IMDb rating lookup failed; using TMDB rating instead.", error)
+    }
+  }
+
+  return {
+    tmdb_id: Number(details.id) || Number(tmdbId) || null,
+    title: details.title || "",
+    release_year: parseInt(year) || new Date().getFullYear(),
+    genre: genres.join(", "),
+    rating,
+    poster_url: details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
+  }
+}
+
+async function fetchSeriesInfoByTmdbId(tmdbId) {
+  const detailsUrl = `${TMDB_BASE_URL}/tv/${tmdbId}?api_key=${TMDB_API_KEY}&language=en-US`
+  const [detailsResponse, extIdsResponse] = await Promise.all([
+    fetch(detailsUrl),
+    fetch(`${TMDB_BASE_URL}/tv/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`),
+  ])
+  if (!detailsResponse.ok) throw new Error(`TMDB details failed (${detailsResponse.status})`)
+
+  const details = await detailsResponse.json()
+  const extIds = extIdsResponse.ok ? await extIdsResponse.json() : {}
+  const startYear = details.first_air_date ? details.first_air_date.substring(0, 4) : ""
+  let endYear = details.last_air_date ? details.last_air_date.substring(0, 4) : ""
+  if (details.status === "Returning Series") endYear = ""
+
+  const genres = details.genres ? details.genres.map(g => g.name) : []
+  let rating = details.vote_average || 0
+
+  if (extIds.imdb_id) {
+    try {
+      const imdbData = await (await fetch(`https://www.omdbapi.com/?i=${extIds.imdb_id}&apikey=${OMDB_API_KEY}`)).json()
+      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A") rating = parseFloat(imdbData.imdbRating)
+    } catch (error) {
+      console.warn("IMDb rating lookup failed; using TMDB rating instead.", error)
+    }
+  }
+
+  const parsedStart = parseInt(startYear) || new Date().getFullYear()
+  const parsedEnd = endYear ? parseInt(endYear) : parsedStart
+
+  return {
+    tmdb_id: Number(details.id) || Number(tmdbId) || null,
+    title: details.name || "",
+    release_year: parsedStart,
+    end_year: parsedEnd,
+    number_of_seasons: Math.max(1, parseInt(details.number_of_seasons) || 1),
+    genre: genres.join(", "),
+    rating,
+    poster_url: details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
+  }
+}
+
+function applyAutoFillInfo(info, mediaType) {
+  titleInput.value = info.title
+  genreInput.value = info.genre
+  releaseYearInput.value = info.release_year
+  ratingInput.value = info.rating
+  if (tmdbIdInput) tmdbIdInput.value = info.tmdb_id || ""
+
+  if (mediaType === "series") {
+    endYearInput.value = info.end_year || ""
+    if (seasonsInput) seasonsInput.value = info.number_of_seasons || ""
+    syncAddSeriesProgressFromStatus()
+  } else {
+    endYearInput.value = ""
+    if (seasonsInput) seasonsInput.value = ""
+    if (watchedSeasonsInput) watchedSeasonsInput.value = ""
+  }
+
+  if (info.poster_url) {
+    posterImage.src = info.poster_url
+    syncPosterPreview(posterImage, posterPlaceholder, removePosterBtn)
+  } else {
+    posterImage.removeAttribute("src")
+    syncPosterPreview(posterImage, posterPlaceholder, removePosterBtn)
+  }
+}
+
+async function selectAutoFillResult(index) {
+  if (autoFillCandidateSelectionPending) return
+  const candidate = autoFillCandidates[index]
+  if (!candidate) return
+
+  autoFillCandidateSelectionPending = true
+  showLoading()
+  try {
+    const mediaType = candidate._autoFillMediaType === "series" ? "series" : "movie"
+    const info = mediaType === "movie"
+      ? await fetchMovieInfoByTmdbId(candidate.id)
+      : await fetchSeriesInfoByTmdbId(candidate.id)
+
+    mediaTypeSelect.value = mediaType
+    updateEndYearVisibility()
+    applyAutoFillInfo(info, mediaType)
+    closeAutoFillResults()
+    showToast(`"${info.title}" info loaded! ✨`, "success")
+  } catch (error) {
+    autoFillCandidateSelectionPending = false
+    showToast("Error fetching info: " + error.message, "error")
+  } finally {
+    hideLoading()
+  }
+}
+
+async function fetchMediaInfo(preferredTmdbId = null) {
   const rawTitle = titleInput.value.trim()
   const title = normalizeMediaSearchTitle(rawTitle)
   if (!title) { showToast("Please enter a title to search", "error"); return }
 
-  // Show the cleaned title immediately, then replace it with TMDB's official title.
+  // Show the cleaned title immediately, while keeping any year/file hints for ranking.
   if (title !== rawTitle) titleInput.value = title
 
-  const mediaType = mediaTypeSelect.value
+  const preferredMediaType = mediaTypeSelect.value
+  const knownTmdbId = Number(preferredTmdbId) || 0
+  const requestSerial = ++autoFillSearchRequestSerial
+  closeAutoFillResults()
   showLoading()
 
   try {
-    const info = mediaType === "movie"
-      ? await searchMovieInfo(title)
-      : await searchSeriesInfo(title)
-
-    hideLoading()
-    if (!info) {
-      showToast("No info found. Please check the title.", "info")
+    // Recommendation cards already carry an exact TMDB id; preserve their original
+    // one-click prefill behavior instead of asking the user to choose again.
+    if (knownTmdbId > 0) {
+      const info = preferredMediaType === "movie"
+        ? await fetchMovieInfoByTmdbId(knownTmdbId)
+        : await fetchSeriesInfoByTmdbId(knownTmdbId)
+      if (requestSerial !== autoFillSearchRequestSerial) return
+      applyAutoFillInfo(info, preferredMediaType)
+      hideLoading()
+      showToast(`"${info.title}" info loaded! ✨`, "success")
       return
     }
 
-    titleInput.value       = info.title
-    genreInput.value       = info.genre
-    releaseYearInput.value = info.release_year
-    ratingInput.value      = info.rating
-    if (tmdbIdInput) tmdbIdInput.value = info.tmdb_id || ""
+    const candidates = await searchAutoFillCandidates(title, preferredMediaType)
+    if (requestSerial !== autoFillSearchRequestSerial) return
+    hideLoading()
 
-    if (mediaType === "series") {
-      if (info.end_year) endYearInput.value = info.end_year
-      if (seasonsInput && info.number_of_seasons) seasonsInput.value = info.number_of_seasons
-      syncAddSeriesProgressFromStatus()
+    if (!candidates.length) {
+      showToast("No matching titles found. Try the main title without extra words.", "info")
+      return
     }
 
-    if (info.poster_url) {
-      posterImage.src = info.poster_url
-      syncPosterPreview(posterImage, posterPlaceholder, removePosterBtn)
-    }
-
-    showToast(`"${info.title}" info loaded! ✨`, "success")
-  } catch(error) {
+    showAutoFillResults(candidates, title)
+  } catch (error) {
+    if (requestSerial !== autoFillSearchRequestSerial) return
     hideLoading()
     showToast("Error fetching info: " + error.message, "error")
   }
