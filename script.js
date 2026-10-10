@@ -163,13 +163,15 @@ const _cache = { data: null, ts: 0, TTL: 60_000 }   // 60s in-memory cache
 const COLLECTION_SNAPSHOT_PREFIX = "cinema_collection_snapshot_v2"
 const COLLECTION_SNAPSHOT_MAX_AGE = 7 * 24 * 60 * 60 * 1000
 const RECOMMENDATION_SNAPSHOT_PREFIX = "cinema_recommendations_snapshot_v4"
-const RECOMMENDATION_SNAPSHOT_MAX_AGE = 6 * 60 * 60 * 1000
+const RECOMMENDATION_SNAPSHOT_MAX_AGE = 3 * 24 * 60 * 60 * 1000
 const recommendationState = {
   data: null,
   loadedAt: 0,
   loading: false,
   requestSerial: 0,
   renderSignature: "",
+  refinementTimer: null,
+  refinementAttempts: 0,
   itemMap: new Map(),
   mediaFilter: "all",
   sortMode: "priority",
@@ -253,10 +255,20 @@ function clearRecommendationSnapshot() {
   try { localStorage.removeItem(getRecommendationSnapshotKey()) } catch (_) {}
 }
 
+function clearRecommendationRefinementTimer() {
+  if (recommendationState.refinementTimer) clearTimeout(recommendationState.refinementTimer)
+  recommendationState.refinementTimer = null
+}
+
 function invalidateRecommendationClientCache() {
+  // Invalidate any in-flight GET before it can restore stale picks after editing a title.
+  recommendationState.requestSerial += 1
   recommendationState.data = null
   recommendationState.loadedAt = 0
+  recommendationState.loading = false
   recommendationState.renderSignature = ""
+  recommendationState.refinementAttempts = 0
+  clearRecommendationRefinementTimer()
   clearRecommendationSnapshot()
 }
 
@@ -488,14 +500,14 @@ function showSkeletons(count = 16) {
   }
   grid.appendChild(frag)
   // Also show stats as skeleton
-  ;["stat-movies","stat-series","stat-avg","stat-top"].forEach(id => {
+  ;["stat-movies","stat-series"].forEach(id => {
     const el = document.getElementById(id)
     if (el) { el.dataset.real = el.textContent; el.classList.add("sk-stat-pulse") }
   })
 }
 
 function hideSkeletons() {
-  ;["stat-movies","stat-series","stat-avg","stat-top"].forEach(id => {
+  ;["stat-movies","stat-series"].forEach(id => {
     const el = document.getElementById(id)
     if (el) el.classList.remove("sk-stat-pulse")
   })
@@ -685,6 +697,7 @@ async function init() {
   // Apply the saved theme before any network work, so refresh never flashes the opposite theme.
   applySavedTheme()
   themeCheckbox.addEventListener("change", toggleTheme)
+  initProfileUI()
 
   initFancySearchSelects()
   updateEndYearVisibility()
@@ -776,6 +789,7 @@ async function init() {
   })
 
   await initialCollectionLoad
+  warmRecommendationFeed()
 }
 
 // ── Accordion toggle for Personal Notes section ──
@@ -2146,18 +2160,18 @@ window.toggleCardSelection = toggleCardSelection
 // ════════════════════════════════════════════════
 
 function updateStats(results) {
-  const movies  = results.filter(r => r.media_type === "movie")
-  const series  = results.filter(r => r.media_type === "series")
-  const topItem = results.reduce((best, r) => !best || r.rating > best.rating ? r : best, null)
-  const avg     = results.length > 0
-    ? (results.reduce((s, r) => s + (parseFloat(r.rating) || 0), 0) / results.length).toFixed(1)
-    : "—"
-
-  const el = id => document.getElementById(id)
-  if (el("stat-movies")) el("stat-movies").textContent = movies.length
-  if (el("stat-series")) el("stat-series").textContent = series.length
-  if (el("stat-avg"))    el("stat-avg").textContent    = avg
-  if (el("stat-top"))    el("stat-top").textContent    = topItem ? topItem.title : "—"
+  // Always show complete vault totals, even if a search or type filter is active.
+  const items = currentUser && _cache.ts > 0 && Array.isArray(_cache.data) ? _cache.data : results
+  let movieCount = 0
+  let seriesCount = 0
+  for (const item of items) {
+    if (item.media_type === "movie") movieCount += 1
+    else if (item.media_type === "series") seriesCount += 1
+  }
+  const moviesEl = document.getElementById("stat-movies")
+  const seriesEl = document.getElementById("stat-series")
+  if (moviesEl) moviesEl.textContent = movieCount.toLocaleString()
+  if (seriesEl) seriesEl.textContent = seriesCount.toLocaleString()
 }
 
 // ════════════════════════════════════════════════
@@ -3748,7 +3762,9 @@ function renderRecommendations(data, { force = false } = {}) {
   if (watchedEl) watchedEl.textContent = Number(profile.watched_count) || 0
   if (vaultEl) vaultEl.textContent = Number(profile.vault_total) || 0
   if (progressEl) progressEl.textContent = Number(profile.tracked_series_progress) || 0
-  if (updatedEl) updatedEl.textContent = formatRecommendationUpdatedAt(data.generated_at)
+  if (updatedEl) updatedEl.textContent = data.meta?.background_refreshing
+    ? `${formatRecommendationUpdatedAt(data.generated_at)} · Refining picks in background…`
+    : formatRecommendationUpdatedAt(data.generated_at)
 
   const searchSection = document.getElementById("rec-section-search")
   if (searchSection) searchSection.hidden = true
@@ -3771,7 +3787,14 @@ function renderRecommendations(data, { force = false } = {}) {
   const empty = document.getElementById("recommendations-empty")
   if (empty) empty.hidden = true
   const filterEmpty = document.getElementById("recommendations-filter-empty")
-  if (filterEmpty) filterEmpty.hidden = total !== 0
+  if (filterEmpty) {
+    filterEmpty.hidden = total !== 0 || Boolean(data.meta?.background_refreshing)
+  }
+  if (data.meta?.background_refreshing && total === 0 && Number(profile.vault_total) > 0) {
+    // No finished quick picks yet: keep the skeleton until the full feed arrives.
+    if (content) content.hidden = true
+    setRecommendationsLoading(true)
+  }
   updateRecommendationToolbarSummary(topFeed.length)
 }
 
@@ -3869,16 +3892,84 @@ function handleRecommendationClick(event) {
   else openRecommendationItem(item)
 }
 
-async function loadRecommendations({ force = false, background = false } = {}) {
+function recommendationViewVisible() {
+  return document.getElementById("view-for-you")?.style.display === "block"
+}
+
+// The server supplies a small fast feed while it finishes exhaustive series and
+// relationship checks. Poll cached results only while For You is visible.
+function scheduleRecommendationRefinement() {
+  clearRecommendationRefinementTimer()
+  if (!currentUser || !recommendationViewVisible() ||
+      !recommendationState.data?.meta?.background_refreshing ||
+      recommendationState.refinementAttempts >= 20) return
+  const delay = Math.min(12000, 3000 + recommendationState.refinementAttempts * 1200)
+  recommendationState.refinementTimer = setTimeout(async () => {
+    recommendationState.refinementTimer = null
+    if (!currentUser || !recommendationViewVisible()) return
+    if (recommendationState.loading) {
+      scheduleRecommendationRefinement()
+      return
+    }
+    const serial = recommendationState.requestSerial
+    const account = currentUser.id || currentUser.username
+    recommendationState.refinementAttempts += 1
+    try {
+      const response = await fetch(RECOMMENDATIONS_BASE_URL, { headers: authHeaders() })
+      if (serial !== recommendationState.requestSerial ||
+          account !== (currentUser?.id || currentUser?.username)) return
+      if (response.status === 401) { handleUnauthorized(); return }
+      if (!response.ok) throw new Error(`Refinement check returned ${response.status}`)
+      const data = await response.json()
+      if (!data || data.error) throw new Error(data?.error || "Invalid recommendations")
+      const oldData = recommendationState.data
+      const changed = data.generated_at !== oldData?.generated_at ||
+        data.meta?.result_stage !== oldData?.meta?.result_stage ||
+        Boolean(data.meta?.background_refreshing) !== Boolean(oldData?.meta?.background_refreshing)
+      recommendationState.data = data
+      recommendationState.loadedAt = Date.now()
+      if (changed) {
+        saveRecommendationSnapshot(data)
+        if (recommendationViewVisible()) renderRecommendations(data, { force: true })
+      }
+    } catch (error) {
+      console.warn("Recommendation refinement is still pending:", error)
+    }
+    if (recommendationState.data?.meta?.background_refreshing) scheduleRecommendationRefinement()
+  }, delay)
+}
+
+// Pre-warm recommendations only when the user's collection request has settled.
+// Never build an invisible card grid: that would slow down the Collection tab.
+function warmRecommendationFeed() {
+  if (!currentUser || recommendationState.loading || recommendationState.data) return
+  const loadInIdle = () => {
+    if (currentUser && !recommendationState.loading && !recommendationState.data)
+      void loadRecommendations({ background: true, prefetch: true })
+  }
+  if (typeof window.requestIdleCallback === "function")
+    window.requestIdleCallback(loadInIdle, { timeout: 2000 })
+  else setTimeout(loadInIdle, 950)
+}
+
+async function loadRecommendations({ force = false, background = false, prefetch = false } = {}) {
   if (!currentUser) {
-    openAuthModal("login")
+    if (!prefetch) openAuthModal("login")
     return
   }
-  if (recommendationState.loading && !force) return
+  if (recommendationState.loading && !force) {
+    if (!prefetch && recommendationState.data && recommendationViewVisible())
+      renderRecommendations(recommendationState.data)
+    else if (!prefetch && !recommendationState.data) setRecommendationsLoading(true)
+    return
+  }
 
   const now = Date.now()
-  if (!force && recommendationState.data && now - recommendationState.loadedAt < 5 * 60_000) {
-    renderRecommendations(recommendationState.data)
+  if (!force && recommendationState.data && now - recommendationState.loadedAt < 3 * 60_000) {
+    if (recommendationViewVisible()) {
+      renderRecommendations(recommendationState.data)
+      scheduleRecommendationRefinement()
+    }
     return
   }
 
@@ -3886,8 +3977,9 @@ async function loadRecommendations({ force = false, background = false } = {}) {
     const snapshot = readRecommendationSnapshot()
     if (snapshot) {
       recommendationState.data = snapshot
-      recommendationState.loadedAt = now - 10 * 60_000
-      renderRecommendations(snapshot, { force: true })
+      const lastUpdated = Date.parse(snapshot.generated_at)
+      recommendationState.loadedAt = Number.isFinite(lastUpdated) ? lastUpdated : 0
+      if (!prefetch && recommendationViewVisible()) renderRecommendations(snapshot, { force: true })
       background = true
     }
   }
@@ -3895,50 +3987,51 @@ async function loadRecommendations({ force = false, background = false } = {}) {
   const serial = ++recommendationState.requestSerial
   recommendationState.loading = true
   const refreshBtn = document.getElementById("recommendations-refresh-btn")
-  if (refreshBtn) {
+  if (refreshBtn && !prefetch) {
     refreshBtn.disabled = true
     refreshBtn.classList.add("is-loading")
   }
 
   let loadingTimer = null
-  if (!background && !recommendationState.data) {
-    loadingTimer = window.setTimeout(() => setRecommendationsLoading(true), 450)
+  if (!background && !prefetch && !recommendationState.data) {
+    loadingTimer = window.setTimeout(() => setRecommendationsLoading(true), 280)
   }
 
   try {
     const url = `${RECOMMENDATIONS_BASE_URL}${force ? "?refresh=1" : ""}`
     const response = await fetch(url, { headers: authHeaders() })
     if (serial !== recommendationState.requestSerial) return
-    if (response.status === 401) {
-      handleUnauthorized()
-      return
-    }
+    if (response.status === 401) { handleUnauthorized(); return }
     if (!response.ok) throw new Error(`Recommendation service returned ${response.status}`)
     const data = await response.json()
     if (data?.error) throw new Error(data.error)
 
     recommendationState.data = data
     recommendationState.loadedAt = Date.now()
+    recommendationState.refinementAttempts = 0
     saveRecommendationSnapshot(data)
-    renderRecommendations(data, { force })
+    if (recommendationViewVisible()) {
+      renderRecommendations(data, { force: true })
+      scheduleRecommendationRefinement()
+    }
   } catch (error) {
     if (serial !== recommendationState.requestSerial) return
     console.error("Recommendation loading failed:", error)
-    if (!recommendationState.data) {
+    if (!recommendationState.data && !prefetch) {
       const errorBox = document.getElementById("recommendations-error")
       const errorMessage = document.getElementById("recommendations-error-message")
       const content = document.getElementById("recommendations-content")
       if (errorBox) errorBox.hidden = false
       if (errorMessage) errorMessage.textContent = "The recommendation engine could not connect right now. Your collection is unaffected."
       if (content) content.hidden = true
-    } else if (force) {
+    } else if (force && !prefetch) {
       showToast("Could not refresh picks — keeping your last recommendations", "info")
     }
   } finally {
     if (loadingTimer) window.clearTimeout(loadingTimer)
     if (serial === recommendationState.requestSerial) {
       recommendationState.loading = false
-      setRecommendationsLoading(false)
+      if (!prefetch) setRecommendationsLoading(false)
       if (refreshBtn) {
         refreshBtn.disabled = false
         refreshBtn.classList.remove("is-loading")
@@ -4031,12 +4124,14 @@ function switchView(view) {
     "for-you": document.getElementById("view-for-you"),
     add: document.getElementById("view-add"),
     social: document.getElementById("view-social"),
+    profile: document.getElementById("view-profile"),
   }
   const navs = {
     collection: document.getElementById("nav-collection"),
     "for-you": document.getElementById("nav-for-you"),
     add: document.getElementById("nav-add"),
     social: document.getElementById("nav-social"),
+    profile: document.getElementById("profile-open-btn"),
   }
 
   Object.entries(views).forEach(([key, element]) => {
@@ -4048,9 +4143,14 @@ function switchView(view) {
 
   if (view === "add") {
     views.add?.querySelector(".personal-section")?.classList.remove("personal-section--open")
+    // Focus the title on every visit, including when opening from a recommendation.
+    requestAnimationFrame(() => titleInput?.focus({ preventScroll: true }))
   }
+  if (view === "profile") syncProfileForm()
   if (view === "for-you") {
     void loadRecommendations()
+  } else {
+    clearRecommendationRefinementTimer()
   }
   if (view === "social") {
     closeFriendVault({ silent: true })
@@ -5088,6 +5188,171 @@ function escapeHtml(str) {
 document.addEventListener("DOMContentLoaded", init)
 
 // ════════════════════════════════════════════════
+//  ACCOUNT PROFILE — server-persisted for each authenticated user
+// ════════════════════════════════════════════════
+let pendingProfileAvatar = undefined // undefined = unchanged, null = remove, string = new image
+let profilePhotoRequest = 0
+
+function updateAvatarElement(container, letterId, imageId, user, avatarOverride) {
+  if (!container) return
+  const letter = document.getElementById(letterId)
+  const image = document.getElementById(imageId)
+  const name = String(user?.display_name || user?.username || "U").trim()
+  if (letter) letter.textContent = (name.charAt(0) || "U").toUpperCase()
+  const source = avatarOverride !== undefined ? avatarOverride : user?.avatar_url
+  const validSource = typeof source === "string" && /^data:image\/(?:jpeg|png|webp);base64,/.test(source)
+  if (image) {
+    if (validSource) image.src = source
+    else image.removeAttribute("src")
+    image.hidden = !validSource
+  }
+  if (letter) letter.hidden = Boolean(validSource)
+}
+
+function showProfileStatus(message = "", type = "") {
+  const status = document.getElementById("profile-status")
+  if (!status) return
+  status.textContent = message
+  status.hidden = !message
+  status.className = `profile-status ${type ? `is-${type}` : ""}`.trim()
+}
+
+function syncProfileForm() {
+  if (!currentUser) return
+  ++profilePhotoRequest
+  pendingProfileAvatar = undefined
+  const fieldValues = {
+    "profile-display-name": currentUser.display_name || "",
+    "profile-username": currentUser.username || "",
+    "profile-email": currentUser.email || "",
+  }
+  for (const [fieldId, value] of Object.entries(fieldValues)) {
+    const field = document.getElementById(fieldId)
+    if (field) field.value = value
+  }
+  const input = document.getElementById("profile-photo-file")
+  if (input) input.value = ""
+  updateAvatarElement(document.getElementById("profile-portrait"), "profile-avatar-letter", "profile-avatar-image", currentUser)
+  showProfileStatus()
+}
+
+async function shrinkProfileImage(file) {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 8 * 1024 * 1024) {
+    throw new Error("Choose a JPG, PNG or WebP image smaller than 8 MB")
+  }
+  const url = URL.createObjectURL(file)
+  try {
+    const original = new Image()
+    await new Promise((resolve, reject) => {
+      original.onload = resolve
+      original.onerror = () => reject(new Error("Could not read this image"))
+      original.src = url
+    })
+    const canvas = document.createElement("canvas")
+    canvas.width = canvas.height = 320
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("Image processing is unavailable")
+    const side = Math.min(original.naturalWidth, original.naturalHeight)
+    ctx.drawImage(original,
+      (original.naturalWidth - side) / 2, (original.naturalHeight - side) / 2, side, side,
+      0, 0, 320, 320)
+    for (const quality of [.88, .75, .62, .48]) {
+      const result = canvas.toDataURL("image/jpeg", quality)
+      if (result.length < 460_000) return result
+    }
+    throw new Error("This image is too large after resizing")
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+function migrateProfileSnapshots(previous, next) {
+  if (!previous || !next || previous.toLowerCase() === next.toLowerCase()) return
+  for (const prefix of [COLLECTION_SNAPSHOT_PREFIX, RECOMMENDATION_SNAPSHOT_PREFIX]) {
+    const oldKey = `${prefix}:${previous.toLowerCase()}`
+    const newKey = `${prefix}:${next.toLowerCase()}`
+    try {
+      const saved = localStorage.getItem(oldKey)
+      if (saved) localStorage.setItem(newKey, saved)
+      localStorage.removeItem(oldKey)
+    } catch (_) { /* cache failures must not stop a profile save */ }
+  }
+}
+
+async function saveProfile(event) {
+  event.preventDefault()
+  if (!currentUser) return
+  const username = document.getElementById("profile-username")?.value.trim().replace(/^@/, "").toLowerCase() || ""
+  const display_name = document.getElementById("profile-display-name")?.value.trim() || ""
+  const email = document.getElementById("profile-email")?.value.trim().toLowerCase() || ""
+  if (!USERNAME_PATTERN.test(username)) {
+    showProfileStatus("Username must contain 3–20 lowercase letters, numbers or underscores.", "error")
+    return
+  }
+  if (display_name.length > 60 || !/^\S+@\S+\.\S+$/.test(email)) {
+    showProfileStatus("Check the name and email address before saving.", "error")
+    return
+  }
+  const payload = { username, display_name, email }
+  if (pendingProfileAvatar !== undefined) payload.avatar_url = pendingProfileAvatar
+  const saveButton = document.getElementById("profile-save")
+  if (saveButton) saveButton.disabled = true
+  showProfileStatus("Saving your profile…")
+  try {
+    const response = await fetch(`${AUTH_BASE_URL}/profile`, {
+      method: "PATCH", headers: authHeaders(), body: JSON.stringify(payload),
+    })
+    const result = await response.json()
+    if (response.status === 401) { handleUnauthorized(); switchView("collection"); return }
+    if (!response.ok || !result.user) throw new Error(result.error || "Could not save profile")
+    const previousUsername = currentUser.username
+    migrateProfileSnapshots(previousUsername, result.user.username)
+    if (result.token) setToken(result.token)
+    currentUser = { ...currentUser, ...result.user, token: result.token || getToken() }
+    localStorage.setItem("cinema_username", currentUser.username)
+    pendingProfileAvatar = undefined
+    updateAuthUI(currentUser)
+    syncSocialProfileUI()
+    updateAvatarElement(document.getElementById("profile-portrait"), "profile-avatar-letter", "profile-avatar-image", currentUser)
+    showProfileStatus("Your profile has been saved successfully.", "success")
+    showToast("Profile saved", "success")
+  } catch (error) {
+    showProfileStatus(error.message || "Could not save your changes. Try again.", "error")
+  } finally {
+    if (saveButton) saveButton.disabled = false
+  }
+}
+
+function initProfileUI() {
+  document.getElementById("profile-form")?.addEventListener("submit", saveProfile)
+  document.getElementById("profile-reset")?.addEventListener("click", syncProfileForm)
+  document.getElementById("profile-photo-change")?.addEventListener("click", () => {
+    document.getElementById("profile-photo-file")?.click()
+  })
+  document.getElementById("profile-photo-remove")?.addEventListener("click", () => {
+    ++profilePhotoRequest
+    pendingProfileAvatar = null
+    updateAvatarElement(document.getElementById("profile-portrait"), "profile-avatar-letter", "profile-avatar-image", currentUser, null)
+    showProfileStatus()
+  })
+  document.getElementById("profile-photo-file")?.addEventListener("change", async event => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    const serial = ++profilePhotoRequest
+    showProfileStatus("Optimizing your new photo…")
+    try {
+      const avatar = await shrinkProfileImage(file)
+      if (serial !== profilePhotoRequest) return
+      pendingProfileAvatar = avatar
+      updateAvatarElement(document.getElementById("profile-portrait"), "profile-avatar-letter", "profile-avatar-image", currentUser, avatar)
+      showProfileStatus()
+    } catch (error) {
+      if (serial === profilePhotoRequest) showProfileStatus(error.message, "error")
+    }
+  })
+}
+
+// ════════════════════════════════════════════════
 //  AUTH SYSTEM
 // ════════════════════════════════════════════════
 
@@ -5108,6 +5373,7 @@ async function restoreSession() {
       currentUser = { token, ...data }
       localStorage.setItem("cinema_username", data.username)
       updateAuthUI(currentUser)
+      if (document.getElementById("view-profile")?.style.display === "block") syncProfileForm()
       syncSocialProfileUI()
       updateSocialRequestBadge(Number(data.pending_requests_count) || 0)
     } else {
@@ -5130,8 +5396,9 @@ function updateAuthUI(user) {
   if (user) {
     if (guestBtn) guestBtn.style.display = "none"
     if (userPill) userPill.style.display = "flex"
-    if (userAvatar) userAvatar.textContent = user.username.charAt(0).toUpperCase()
-    if (userLabel) userLabel.textContent = `@${user.username}`
+    if (userAvatar) updateAvatarElement(userAvatar, "user-avatar-letter", "user-avatar-image", user)
+    if (userLabel) userLabel.textContent = user.display_name || `@${user.username}`
+    document.getElementById("profile-open-btn")?.setAttribute("title", `Open @${user.username}'s profile`)
     if (guestBanner) guestBanner.style.display = "none"
     if (navAdd) navAdd.style.opacity = "1"
     if (navForYou) navForYou.style.opacity = "1"
@@ -5255,6 +5522,7 @@ async function submitLogin() {
       closeAuthModal()
       showToast(`Welcome back, ${data.username}! 🎬`, "success")
       await searchMedia()
+      warmRecommendationFeed()
     }
   } catch {
     showAuthError(errEl, "Network error — please try again")
@@ -5321,6 +5589,7 @@ async function submitRegister() {
       closeAuthModal()
       showToast(`Account created! Welcome, @${data.username} 🎉`, "success")
       await searchMedia()
+      warmRecommendationFeed()
     }
   } catch {
     showAuthError(errEl, "Network error — please try again")
