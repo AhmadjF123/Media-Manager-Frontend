@@ -1012,6 +1012,7 @@ async function init() {
   themeCheckbox.addEventListener("change", toggleTheme)
 
   initFancySearchSelects()
+  initCollectionCountFilterButtons()
   updateEndYearVisibility()
   bindDatePickerButtons()
   bindSortControls()
@@ -1034,7 +1035,7 @@ async function init() {
   searchInput.addEventListener("keypress", e => { if(e.key==="Enter") searchMedia() })
   searchInput.addEventListener("input", handleCollectionSearchInput)
   searchBySelect.addEventListener("change", handleSearchModeChange)
-  filterTypeSelect.addEventListener("change", () => searchMedia())
+  filterTypeSelect.addEventListener("change", handleCollectionTypeFilterChange)
   actorClearBtn?.addEventListener("click", clearActorSearch)
   actorCopyBtn?.addEventListener("click", copyActorRecommendationList)
   document.addEventListener("click", event => {
@@ -2291,6 +2292,16 @@ function updateEmptyStateCopy(results) {
     return
   }
 
+  const type = filterTypeSelect.value
+  if (type !== "all") {
+    title.textContent = type === "movie" ? "No movies to show" : "No series to show"
+    copy.textContent = "There are no titles of this type in your collection. You can return to all titles."
+    action.setAttribute("onclick", "clearCollectionTypeFilter()")
+    action.querySelector("i").className = "fas fa-layer-group"
+    actionLabel.textContent = "Show All"
+    return
+  }
+
   title.textContent = "Your vault is empty"
   copy.textContent = "Add your first movie or series to get started."
   action.setAttribute("onclick", "switchView('add')")
@@ -2488,8 +2499,58 @@ function toggleCardSelection(checkbox, index) {
 window.toggleCardSelection = toggleCardSelection
 
 // ════════════════════════════════════════════════
-//  STATS
+//  STATS & INSTANT COLLECTION TYPE FILTERS
 // ════════════════════════════════════════════════
+
+// These counters are shortcuts for the existing type dropdown, not a separate
+// filter. The counters always show totals for the entire collection.
+function syncCollectionCountFilterButtons() {
+  const chosen = filterTypeSelect?.value || "all"
+  document.querySelectorAll("#view-collection .stat-filter-button").forEach(button => {
+    const type = button.dataset.collectionFilter
+    const active = chosen === type
+    const name = type === "movie" ? "Movies" : "Series"
+    const count = document.getElementById(type === "movie" ? "stat-movies" : "stat-series")?.textContent || "0"
+    button.classList.toggle("is-active", active)
+    button.setAttribute("aria-pressed", String(active))
+    button.setAttribute("aria-label", `${name}, ${count} titles. ${active ? "Selected; click to show all titles" : "Click to show only " + name.toLowerCase()}`)
+    button.title = active ? "Show all movies and series" : `Show ${name.toLowerCase()} only`
+  })
+}
+
+function handleCollectionTypeFilterChange() {
+  syncCollectionCountFilterButtons()
+  // Switching type is a local operation when the collection is in memory.
+  // Don't wait for the server or re-fetch hundreds of posters for one click.
+  if (searchBySelect.value !== "actor" && Array.isArray(_cache.data)) {
+    const results = prepareDisplayResults(_cache.data.filter(mediaMatchesCurrentFilters))
+    updateResultsTable(results, { animate: false })
+    return
+  }
+  // Actor credits still use the existing special-search path.
+  void searchMedia({ showSkeleton: false, animate: false })
+}
+
+function clearCollectionTypeFilter() {
+  if (filterTypeSelect.value === "all") return
+  filterTypeSelect.value = "all"
+  filterTypeSelect.dispatchEvent(new Event("change", { bubbles: true }))
+}
+window.clearCollectionTypeFilter = clearCollectionTypeFilter
+
+function initCollectionCountFilterButtons() {
+  document.querySelectorAll("#view-collection .stat-filter-button").forEach(button => {
+    button.addEventListener("click", () => {
+      const type = button.dataset.collectionFilter
+      if (type !== "movie" && type !== "series") return
+      filterTypeSelect.value = filterTypeSelect.value === type ? "all" : type
+      // One change event keeps the fancy dropdown, count buttons, search and
+      // grid/list results fully synchronized.
+      filterTypeSelect.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+  })
+  syncCollectionCountFilterButtons()
+}
 
 function updateStats(results) {
   // Counts represent the whole collection, not just a filtered search page.
@@ -2504,6 +2565,7 @@ function updateStats(results) {
   const seriesCount = document.getElementById("stat-series")
   if (movieCount) movieCount.textContent = movies.toLocaleString()
   if (seriesCount) seriesCount.textContent = series.toLocaleString()
+  syncCollectionCountFilterButtons()
 }
 
 // ════════════════════════════════════════════════

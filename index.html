@@ -28,7 +28,7 @@
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
     />
 
-    <link rel="stylesheet" href="style.css?v=20261011-profile-layout-fix" />
+    <link rel="stylesheet" href="style.css?v=20261011-collection-count-filter" />
   </head>
   <body>
     <script>
@@ -147,16 +147,18 @@
         </div>
 
         <!-- Stats ribbon -->
-        <div class="stats-ribbon stats-ribbon--counts" aria-label="Your collection totals">
-          <div class="stat-block stat-block--movie">
-            <span class="stat-icon"><i class="fas fa-film"></i></span>
+        <div class="stats-ribbon stats-ribbon--counts" role="group" aria-label="Filter your collection by type">
+          <button type="button" class="stat-block stat-block--movie stat-filter-button" data-collection-filter="movie" aria-pressed="false" title="Show movies only">
+            <span class="stat-icon" aria-hidden="true"><i class="fas fa-film"></i></span>
             <span class="stat-copy"><span class="stat-n" id="stat-movies">0</span><span class="stat-l">Movies</span></span>
-          </div>
+            <span class="stat-filter-check" aria-hidden="true"><i class="fas fa-check"></i></span>
+          </button>
           <div class="stat-sep" aria-hidden="true"></div>
-          <div class="stat-block stat-block--series">
-            <span class="stat-icon"><i class="fas fa-tv"></i></span>
+          <button type="button" class="stat-block stat-block--series stat-filter-button" data-collection-filter="series" aria-pressed="false" title="Show series only">
+            <span class="stat-icon" aria-hidden="true"><i class="fas fa-tv"></i></span>
             <span class="stat-copy"><span class="stat-n" id="stat-series">0</span><span class="stat-l">Series</span></span>
-          </div>
+            <span class="stat-filter-check" aria-hidden="true"><i class="fas fa-check"></i></span>
+          </button>
         </div>
 
         <!-- Search -->
@@ -1588,6 +1590,6 @@
       </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=20261011-collection-count-filter"></script>
   </body>
 </html>

@@ -7694,6 +7694,87 @@ body.light-theme .stats-ribbon--counts .stat-block--series .stat-icon { color: #
   .stats-ribbon--counts .stat-sep { height: 42px; }
 }
 
+/* The two total counters double as one-tap collection filters. */
+.stats-ribbon--counts .stat-filter-button {
+  position: relative;
+  appearance: none;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  padding: 10px clamp(8px, 1.7vw, 18px);
+  margin: -6px 0;
+  cursor: pointer;
+  text-align: left;
+  transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.stats-ribbon--counts .stat-filter-button:hover {
+  background: rgba(212,168,67,.065);
+  border-color: rgba(212,168,67,.25);
+  transform: translateY(-2px);
+}
+.stats-ribbon--counts .stat-filter-button:active { transform: translateY(0); }
+.stats-ribbon--counts .stat-filter-button:focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 3px;
+}
+.stats-ribbon--counts .stat-filter-button.is-active {
+  background: linear-gradient(130deg, rgba(212,168,67,.16), rgba(212,168,67,.045));
+  border-color: rgba(212,168,67,.55);
+  box-shadow: 0 0 0 1px rgba(212,168,67,.08), 0 8px 22px rgba(212,168,67,.065);
+}
+.stats-ribbon--counts .stat-filter-button.stat-block--series:hover {
+  background: rgba(154,117,232,.07);
+  border-color: rgba(154,117,232,.3);
+}
+.stats-ribbon--counts .stat-filter-button.stat-block--series.is-active {
+  background: linear-gradient(130deg, rgba(154,117,232,.17), rgba(154,117,232,.045));
+  border-color: rgba(154,117,232,.52);
+  box-shadow: 0 0 0 1px rgba(154,117,232,.07), 0 8px 22px rgba(154,117,232,.07);
+}
+.stats-ribbon--counts .stat-filter-check {
+  position: absolute;
+  top: 6px;
+  right: 9px;
+  display: grid;
+  place-items: center;
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: #201405;
+  font-size: 10px;
+  opacity: 0;
+  transform: scale(.55);
+  transition: opacity .18s ease, transform .18s ease;
+  pointer-events: none;
+}
+.stats-ribbon--counts .stat-filter-button.stat-block--series .stat-filter-check {
+  background: #b69ae7;
+  color: #20132e;
+}
+.stats-ribbon--counts .stat-filter-button.is-active .stat-filter-check {
+  opacity: 1;
+  transform: scale(1);
+}
+body.light-theme .stats-ribbon--counts .stat-filter-button.is-active {
+  background: rgba(212,168,67,.19);
+}
+body.light-theme .stats-ribbon--counts .stat-filter-button.stat-block--series.is-active {
+  background: rgba(154,117,232,.13);
+}
+@media (max-width: 600px) {
+  .stats-ribbon--counts .stat-filter-button { padding: 8px 5px; border-radius: 14px; }
+  .stats-ribbon--counts .stat-filter-check { top: 3px; right: 3px; width: 14px; height: 14px; font-size: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stats-ribbon--counts .stat-filter-button,
+  .stats-ribbon--counts .stat-filter-check { transition: none; }
+  .stats-ribbon--counts .stat-filter-button:hover { transform: none; }
+}
+
 /* ════════════════════════════════════════════════
    ACCOUNT PROFILE / EDITABLE IDENTITY
 ════════════════════════════════════════════════ */
