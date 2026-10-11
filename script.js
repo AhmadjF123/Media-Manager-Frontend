@@ -482,6 +482,7 @@ function _cacheInvalidate() {
   _cache.ts = 0
   _actorVaultCandidatesCache.clear()
   invalidateRecommendationClientCache()
+  window.CinemaIntel?.onMediaChange()
 }
 
 function getCollectionSnapshotKey() {
@@ -1100,6 +1101,7 @@ async function init() {
 
   initSocialUI()
   initRecommendationsUI()
+  window.CinemaIntel?.init()
 
   // Edit modal close
   window.addEventListener("click", e => {
@@ -4469,7 +4471,7 @@ window.loadRecommendations = loadRecommendations
 
 function switchView(view) {
   // Guests can't add media or open private personalized/social features.
-  if ((view === "add" || view === "social" || view === "for-you" || view === "profile") && !currentUser) {
+  if ((view === "add" || view === "social" || view === "for-you" || view === "profile" || view === "discover" || view === "alerts") && !currentUser) {
     openAuthModal("login")
     const message = view === "social"
       ? "Please sign in to connect with friends"
@@ -4483,6 +4485,8 @@ function switchView(view) {
   const views = {
     collection: document.getElementById("view-collection"),
     "for-you": document.getElementById("view-for-you"),
+    discover: document.getElementById("view-discover"),
+    alerts: document.getElementById("view-alerts"),
     add: document.getElementById("view-add"),
     social: document.getElementById("view-social"),
     profile: document.getElementById("view-profile"),
@@ -4490,6 +4494,7 @@ function switchView(view) {
   const navs = {
     collection: document.getElementById("nav-collection"),
     "for-you": document.getElementById("nav-for-you"),
+    discover: document.getElementById("nav-discover"),
     add: document.getElementById("nav-add"),
     social: document.getElementById("nav-social"),
   }
@@ -4502,6 +4507,8 @@ function switchView(view) {
   })
 
   document.getElementById("user-profile-link")?.classList.toggle("active", view === "profile")
+  document.getElementById("nav-alerts")?.classList.toggle("active", view === "alerts")
+  window.CinemaIntel?.onView(view)
   if (view === "add") {
     views.add?.querySelector(".personal-section")?.classList.remove("personal-section--open")
     // Focus after the view is displayed, without scrolling the page unexpectedly.
@@ -5562,6 +5569,8 @@ function updateAuthUI(user) {
   const navAdd = document.getElementById("nav-add")
   const navForYou = document.getElementById("nav-for-you")
   const navSocial = document.getElementById("nav-social")
+  const navDiscover = document.getElementById("nav-discover")
+  const navAlerts = document.getElementById("nav-alerts")
 
   if (user) {
     if (guestBtn) guestBtn.style.display = "none"
@@ -5572,6 +5581,8 @@ function updateAuthUI(user) {
     if (navAdd) navAdd.style.opacity = "1"
     if (navForYou) navForYou.style.opacity = "1"
     if (navSocial) navSocial.style.opacity = "1"
+    if (navDiscover) navDiscover.style.opacity = "1"
+    if (navAlerts) navAlerts.style.opacity = "1"
   } else {
     if (guestBtn) guestBtn.style.display = "flex"
     if (userPill) userPill.style.display = "none"
@@ -5579,8 +5590,11 @@ function updateAuthUI(user) {
     if (navAdd) navAdd.style.opacity = "0.5"
     if (navForYou) navForYou.style.opacity = "0.5"
     if (navSocial) navSocial.style.opacity = "0.5"
+    if (navDiscover) navDiscover.style.opacity = "0.5"
+    if (navAlerts) navAlerts.style.opacity = "0.5"
     updateSocialRequestBadge(0)
   }
+  window.CinemaIntel?.onAuthChange(Boolean(user))
 }
 
 // ── Handle expired / invalid token ──

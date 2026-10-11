@@ -28,7 +28,7 @@
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css"
     />
 
-    <link rel="stylesheet" href="style.css?v=20261011-collection-count-filter" />
+    <link rel="stylesheet" href="style.css?v=20261012-release-discovery-v1" />
   </head>
   <body>
     <script>
@@ -75,11 +75,19 @@
           <button class="nav-pill nav-for-you" id="nav-for-you" onclick="switchView('for-you')">
             <i class="fas fa-wand-magic-sparkles"></i><span>For You</span>
           </button>
+          <button class="nav-pill nav-discover" id="nav-discover" onclick="switchView('discover')">
+            <i class="fas fa-compass"></i><span>Discover</span>
+          </button>
           <button class="nav-pill nav-friends" id="nav-social" onclick="switchView('social')">
             <i class="fas fa-user-group"></i><span>Friends</span>
             <b id="social-request-badge" class="nav-notification-badge" hidden>0</b>
           </button>
         </nav>
+
+        <button type="button" class="header-alert-btn" id="nav-alerts" onclick="switchView('alerts')" aria-label="New releases and season alerts" title="Release alerts">
+          <i class="fas fa-bell"></i><span class="header-alert-text">Releases</span>
+          <b id="release-unread-badge" hidden>0</b>
+        </button>
 
         <!-- Auth Button -->
         <div class="auth-area" id="auth-area">
@@ -616,6 +624,76 @@
               <div class="rec-grid" id="rec-grid-because"></div>
             </section>
           </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ NATURAL-LANGUAGE DISCOVERY VIEW ═══════════ -->
+      <section class="view intel-view" id="view-discover" style="display: none">
+        <div class="intel-shell">
+          <header class="intel-hero intel-hero--discovery">
+            <span class="intel-kicker"><i class="fas fa-compass"></i> A smarter way to discover</span>
+            <h1>Describe it. <em>Discover it.</em></h1>
+            <p>Tell Cinéma what you feel like watching — genre, year, rating or running time. Search in Arabic or English. Already-watched titles stay out of your results.</p>
+          </header>
+
+          <section class="intel-panel" aria-label="Movie discovery search">
+            <form id="intel-discovery-form" autocomplete="off">
+              <label class="intel-label" for="intel-discovery-query">What are you in the mood for?</label>
+              <div class="intel-query-row">
+                <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+                <input id="intel-discovery-query" type="search" maxlength="220" spellcheck="false" placeholder="بدي فيلم غموض أقل من ساعتين وتقييمه فوق 7.5" />
+                <button type="submit" id="intel-discovery-submit"><i class="fas fa-search"></i><span>Discover</span></button>
+              </div>
+              <div class="intel-examples" role="group" aria-label="Try a search">
+                <span>Try:</span>
+                <button type="button" data-intel-example="بدي فيلم غموض أقل من ساعتين وتقييمه فوق 7.5">Mystery under 2h · 7.5+</button>
+                <button type="button" data-intel-example="فيلم خيال علمي بعد 2020">Sci-Fi after 2020</button>
+                <button type="button" data-intel-example="مسلسل جريمة وتقييمه فوق 8">Crime series · 8+</button>
+              </div>
+              <div class="intel-filter-row">
+                <label>Media type <select id="intel-discovery-type"><option value="auto">Auto-detect</option><option value="movie">Movies</option><option value="series">Series</option></select></label>
+                <label>Genre <select id="intel-discovery-genre"><option value="">From my request</option><option value="mystery">Mystery</option><option value="thriller">Thriller</option><option value="action">Action</option><option value="comedy">Comedy</option><option value="horror">Horror</option><option value="crime">Crime</option><option value="drama">Drama</option><option value="scifi">Sci-Fi</option><option value="romance">Romance</option><option value="fantasy">Fantasy</option><option value="animation">Animation</option><option value="documentary">Documentary</option><option value="adventure">Adventure</option></select></label>
+                <label>Min. rating <select id="intel-discovery-rating"><option value="">From my request</option><option value="6">6+</option><option value="7">7+</option><option value="7.5">7.5+</option><option value="8">8+</option><option value="8.5">8.5+</option></select></label>
+                <label>Sort by <select id="intel-discovery-sort"><option value="popular">Most popular</option><option value="top">Highest rated</option><option value="latest">Newest</option></select></label>
+              </div>
+              <label class="intel-check"><input type="checkbox" id="intel-discovery-exclude" checked /><span>Hide titles I've already watched</span></label>
+            </form>
+          </section>
+
+          <div id="intel-discovery-status" class="intel-inline-status" role="status" aria-live="polite">Your next favorite is one search away.</div>
+          <div id="intel-discovery-understood" class="intel-interpreted" hidden></div>
+          <div id="intel-discovery-loading" class="intel-loading-grid" hidden aria-label="Discovering titles"><div></div><div></div><div></div><div></div></div>
+          <div id="intel-discovery-results" class="intel-card-grid"></div>
+          <button id="intel-discovery-more" type="button" class="intel-more-btn" hidden><i class="fas fa-plus"></i> Load more results</button>
+        </div>
+      </section>
+
+      <!-- ═══════════ RELEASES AND NEW SEASONS ═══════════ -->
+      <section class="view intel-view" id="view-alerts" style="display: none">
+        <div class="intel-shell">
+          <header class="intel-hero intel-hero--alerts">
+            <span class="intel-kicker"><i class="fas fa-bell"></i> Your personal release radar</span>
+            <h1>Never miss a <em>new chapter.</em></h1>
+            <p>Upcoming movies matching your collection, plus actual new season premieres for series in your vault. Release dates come from TMDB and may change.</p>
+          </header>
+          <section class="intel-alert-options" aria-label="Release alert preferences">
+            <label class="intel-alert-toggle"><input id="intel-alert-movies" type="checkbox" checked /><span><i class="fas fa-film"></i><b>Movie premieres</b><small>Based on genres in your vault</small></span></label>
+            <label class="intel-alert-toggle"><input id="intel-alert-seasons" type="checkbox" checked /><span><i class="fas fa-tv"></i><b>New seasons</b><small>From your saved series</small></span></label>
+            <button id="intel-enable-desktop" type="button" class="intel-control-btn"><i class="far fa-bell"></i> Enable browser alerts</button>
+            <button id="intel-refresh-alerts" type="button" class="intel-control-btn" aria-label="Refresh release alerts"><i class="fas fa-arrows-rotate"></i> Refresh</button>
+          </section>
+          <div class="intel-alert-toolbar">
+            <div class="intel-alert-tabs" role="group" aria-label="Filter release alerts">
+              <button type="button" class="active" data-alert-filter="all">All <span id="intel-alert-total">0</span></button>
+              <button type="button" data-alert-filter="released">Just released</button>
+              <button type="button" data-alert-filter="upcoming">Coming soon</button>
+            </div>
+            <button id="intel-read-all" type="button" class="intel-mark-read"><i class="fas fa-check-double"></i> Mark all read</button>
+          </div>
+          <div id="intel-alert-status" class="intel-inline-status" role="status" aria-live="polite">Checking release dates for your collection…</div>
+          <div id="intel-alert-loading" class="intel-loading-grid" hidden aria-label="Checking new releases"><div></div><div></div><div></div><div></div></div>
+          <div id="intel-alert-results" class="intel-card-grid"></div>
+          <p class="intel-footnote"><i class="fas fa-circle-info"></i> Alerts are checked while Cinéma is open. Browser alerts require permission and an open tab; notifications while the website is closed are not available yet.</p>
         </div>
       </section>
 
@@ -1590,6 +1668,7 @@
       </div>
     </div>
 
-    <script src="script.js?v=20261011-collection-count-filter"></script>
+    <script src="script.js?v=20261012-release-discovery-v1"></script>
+    <script src="intelligence-ui.js?v=20261012-release-discovery-v1"></script>
   </body>
 </html>
