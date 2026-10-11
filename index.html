@@ -19,6 +19,8 @@
 
     <link rel="preconnect" href="https://media-manager-backend-wfeb.onrender.com" crossorigin />
     <link rel="preconnect" href="https://image.tmdb.org" crossorigin />
+    <link rel="preconnect" href="https://api.themoviedb.org" crossorigin />
+    <link rel="dns-prefetch" href="https://www.omdbapi.com" />
     <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin />
 
     <link
@@ -92,9 +94,8 @@
           </button>
           <!-- Logged-in state (hidden by default) -->
           <div class="user-pill" id="user-pill" style="display: none">
-            <button type="button" class="user-identity" id="profile-open-btn"
-              onclick="switchView('profile')" title="Open your profile" aria-label="Open your profile">
-              <span class="user-avatar" id="user-avatar"><span id="user-avatar-letter">U</span><img id="user-avatar-image" alt="" hidden /></span>
+            <button type="button" class="user-profile-link" id="user-profile-link" onclick="switchView('profile')" title="Open your profile" aria-label="Open your profile">
+              <span class="user-avatar" id="user-avatar">U</span>
               <span class="user-name" id="user-name-label"></span>
             </button>
             <button
@@ -146,14 +147,15 @@
         </div>
 
         <!-- Stats ribbon -->
-        <div class="stats-ribbon vault-counts" aria-label="Your collection counts">
-          <div class="vault-count-tile">
-            <span class="vault-count-icon vault-count-icon--movie"><i class="fas fa-clapperboard" aria-hidden="true"></i></span>
-            <span class="vault-count-copy"><strong class="stat-n" id="stat-movies">0</strong><span class="stat-l">Movies</span></span>
+        <div class="stats-ribbon stats-ribbon--counts" aria-label="Your collection totals">
+          <div class="stat-block stat-block--movie">
+            <span class="stat-icon"><i class="fas fa-film"></i></span>
+            <span class="stat-copy"><span class="stat-n" id="stat-movies">0</span><span class="stat-l">Movies</span></span>
           </div>
-          <div class="vault-count-tile">
-            <span class="vault-count-icon vault-count-icon--series"><i class="fas fa-tv" aria-hidden="true"></i></span>
-            <span class="vault-count-copy"><strong class="stat-n" id="stat-series">0</strong><span class="stat-l">Series</span></span>
+          <div class="stat-sep" aria-hidden="true"></div>
+          <div class="stat-block stat-block--series">
+            <span class="stat-icon"><i class="fas fa-tv"></i></span>
+            <span class="stat-copy"><span class="stat-n" id="stat-series">0</span><span class="stat-l">Series</span></span>
           </div>
         </div>
 
@@ -615,56 +617,6 @@
         </div>
       </section>
 
-      <!-- ═══════════ PERSONAL PROFILE VIEW ═══════════ -->
-      <section class="view profile-view" id="view-profile" style="display: none">
-        <div class="profile-shell">
-          <div class="profile-page-heading">
-            <span class="profile-eyebrow"><i class="fas fa-user-astronaut"></i> Your account</span>
-            <h1>Personal Profile</h1>
-            <p>Your own corner of the vault. Edit your name, photo and account details; changes are saved securely to your account.</p>
-          </div>
-          <form id="profile-form" class="profile-card">
-            <div class="profile-portrait-row">
-              <div class="profile-portrait" id="profile-portrait">
-                <span id="profile-avatar-letter">U</span>
-                <img id="profile-avatar-image" alt="Your profile picture" hidden />
-              </div>
-              <div class="profile-photo-actions">
-                <strong>Your photo</strong>
-                <span>Choose a JPG, PNG or WebP image. It will be resized automatically.</span>
-                <div class="profile-photo-buttons">
-                  <input type="file" id="profile-photo-file" accept="image/jpeg,image/png,image/webp" hidden />
-                  <button type="button" class="profile-photo-btn" id="profile-photo-change"><i class="fas fa-camera"></i> Change photo</button>
-                  <button type="button" class="profile-photo-btn profile-photo-btn--quiet" id="profile-photo-remove"><i class="fas fa-trash-can"></i> Remove</button>
-                </div>
-              </div>
-            </div>
-            <div class="profile-fields">
-              <div class="profile-field">
-                <label for="profile-display-name">Display name</label>
-                <input id="profile-display-name" type="text" maxlength="60" autocomplete="name" placeholder="Your name" />
-                <small>This name appears in your header; your unique username stays separate.</small>
-              </div>
-              <div class="profile-field">
-                <label for="profile-username">Account username</label>
-                <div class="profile-input-prefix"><span>@</span><input id="profile-username" type="text" maxlength="20" minlength="3" pattern="[a-z0-9_]{3,20}" autocomplete="username" required spellcheck="false" /></div>
-                <small>3–20 lowercase letters, numbers or underscores. Friends can find you by this handle.</small>
-              </div>
-              <div class="profile-field profile-field--full">
-                <label for="profile-email">Email address</label>
-                <input id="profile-email" type="email" maxlength="254" autocomplete="email" required />
-                <small>Your email is private and is used to sign in.</small>
-              </div>
-            </div>
-            <p id="profile-status" class="profile-status" role="status" aria-live="polite" hidden></p>
-            <div class="profile-footer">
-              <button type="button" class="profile-cancel-btn" id="profile-reset">Reset changes</button>
-              <button type="submit" class="profile-save-btn" id="profile-save"><i class="fas fa-floppy-disk"></i> Save Changes</button>
-            </div>
-          </form>
-        </div>
-      </section>
-
       <!-- ═══════════ ADD VIEW ═══════════ -->
       <section class="view" id="view-add" style="display: none">
         <div class="add-wrap">
@@ -843,6 +795,51 @@
             </div>
             <p class="manual-poster-hint">Upload JPG, PNG or WebP. The image is optimized automatically.</p>
           </div>
+        </div>
+      </section>
+
+      <!-- ═══════════ ACCOUNT PROFILE VIEW ═══════════ -->
+      <section class="view account-view" id="view-profile" style="display: none">
+        <div class="account-shell">
+          <div class="account-heading">
+            <div>
+              <span class="account-eyebrow"><i class="fas fa-user-astronaut"></i> Your space</span>
+              <h1>My Profile</h1>
+              <p>Customize your identity and keep your account information up to date.</p>
+            </div>
+            <button type="button" class="account-back-btn" onclick="switchView('collection')"><i class="fas fa-arrow-left"></i> Back to collection</button>
+          </div>
+          <form id="account-profile-form" class="account-layout">
+            <aside class="account-photo-panel">
+              <div class="account-cover-art"></div>
+              <div class="account-photo" id="account-photo" aria-label="Profile picture"><span id="account-photo-initial">U</span><img id="account-photo-image" alt="Your profile picture" hidden /></div>
+              <h2 id="account-preview-name">Your name</h2>
+              <p id="account-preview-handle">@username</p>
+              <input type="file" id="account-avatar-file" accept="image/png,image/jpeg,image/webp" hidden />
+              <div class="account-photo-actions">
+                <button type="button" id="account-avatar-choose" class="account-photo-button"><i class="fas fa-camera"></i> Change photo</button>
+                <button type="button" id="account-avatar-remove" class="account-photo-remove"><i class="fas fa-trash-can"></i> Remove</button>
+              </div>
+              <p class="account-photo-hint">JPG, PNG or WebP · up to 5 MB. Photos are optimized before saving.</p>
+              <div class="account-joined" id="account-joined"></div>
+            </aside>
+            <div class="account-editor">
+              <div class="account-section-title"><i class="fas fa-id-card"></i><div><h2>Personal details</h2><p>These details are saved securely to your account.</p></div></div>
+              <div class="account-fields">
+                <label class="account-field"><span>Display name</span><input type="text" id="account-display-name" maxlength="50" autocomplete="name" placeholder="How should we call you?" /></label>
+                <label class="account-field"><span>Username</span><div class="account-input-prefix"><i class="fas fa-at"></i><input type="text" id="account-username" minlength="3" maxlength="20" autocomplete="username" spellcheck="false" required /></div><small>3–20 lowercase letters, numbers, or underscores.</small></label>
+                <label class="account-field account-field--wide"><span>Email address</span><div class="account-input-prefix"><i class="far fa-envelope"></i><input type="email" id="account-email" maxlength="254" autocomplete="email" required /></div></label>
+              </div>
+              <div class="account-section-title account-password-title"><i class="fas fa-shield-halved"></i><div><h2>Change password <small>Optional</small></h2><p>Leave these fields empty to keep your current password.</p></div></div>
+              <div class="account-fields">
+                <label class="account-field"><span>Current password</span><input type="password" id="account-current-password" autocomplete="current-password" minlength="8" placeholder="Current password" /></label>
+                <label class="account-field"><span>New password</span><input type="password" id="account-new-password" autocomplete="new-password" minlength="8" placeholder="At least 8 characters" /></label>
+                <label class="account-field account-field--wide"><span>Confirm new password</span><input type="password" id="account-confirm-password" autocomplete="new-password" placeholder="Repeat new password" /></label>
+              </div>
+              <p id="account-form-message" class="account-form-message" role="status" aria-live="polite" hidden></p>
+              <div class="account-footer"><span><i class="fas fa-lock"></i> Changes are saved to your account</span><button type="submit" id="account-save-btn" class="account-save-btn"><i class="fas fa-floppy-disk"></i> Save changes</button></div>
+            </div>
+          </form>
         </div>
       </section>
 

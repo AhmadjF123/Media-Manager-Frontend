@@ -18,6 +18,246 @@ const AUTH_BASE_URL   = "https://media-manager-backend-wfeb.onrender.com/api/aut
 const SOCIAL_BASE_URL = "https://media-manager-backend-wfeb.onrender.com/api/social"
 const RECOMMENDATIONS_BASE_URL = "https://media-manager-backend-wfeb.onrender.com/api/recommendations"
 
+// ── Fast public metadata loading ──
+// Each unique TMDB/OMDb URL has one in-flight request. Completed successful results
+// are reused for a bounded period; failures are never cached. This cache contains
+// public movie information only, not accounts or private collection data.
+const _metadataCache = new Map()
+const _metadataInFlight = new Map()
+const METADATA_CACHE_LIMIT = 240
+const METADATA_SEARCH_TTL = 12 * 60_000
+const METADATA_DETAILS_TTL = 24 * 60 * 60_000
+
+function cachedMetadataValue(url) {
+  const entry = _metadataCache.get(url)
+  if (!entry) return null
+  if (entry.expiresAt <= Date.now()) {
+    _metadataCache.delete(url)
+    return null
+  }
+  _metadataCache.delete(url)
+  _metadataCache.set(url, entry)
+  return entry.value
+}
+
+async function fetchCachedMetadata(url, { ttl = METADATA_SEARCH_TTL, timeout = 12_000 } = {}) {
+  const cached = cachedMetadataValue(url)
+  if (cached !== null) return cached
+  if (_metadataInFlight.has(url)) return _metadataInFlight.get(url)
+
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeout)
+  const pending = (async () => {
+    const response = await fetch(url, { signal: controller.signal })
+    if (!response.ok) throw new Error(`Metadata request failed (${response.status})`)
+    const data = await response.json()
+    _metadataCache.set(url, { value: data, expiresAt: Date.now() + ttl })
+    while (_metadataCache.size > METADATA_CACHE_LIMIT) {
+      _metadataCache.delete(_metadataCache.keys().next().value)
+    }
+    return data
+  })().finally(() => {
+    window.clearTimeout(timer)
+    if (_metadataInFlight.get(url) === pending) _metadataInFlight.delete(url)
+  })
+  _metadataInFlight.set(url, pending)
+  return pending
+}
+
+// Never resize user-uploaded or third-party images: only TMDB CDN poster URLs.
+function mediaImageSize(url, width = 342) {
+  const source = String(url || "")
+  return source.replace(
+    /^https:\/\/image\.tmdb\.org\/t\/p\/(?:w\d+|original)(?=\/)/,
+    `https://image.tmdb.org/t/p/w${width}`
+  )
+}
+
+// One shared detail path for the card overlay and both Auto-Fill forms.
+// Keep a small public-details session cache so repeat opens are instant even
+// after reloading the page (no server or additional service required).
+const TMDB_DETAIL_SESSION_KEY = "cinema_tmdb_details_fast_v1"
+const TMDB_DETAIL_SESSION_LIMIT = 55
+const _tmdbDetailCache = new Map()
+const _tmdbDetailPending = new Map()
+let _tmdbDetailSessionLoaded = false
+let _tmdbDetailSaveTimer = null
+
+function compactTMDBDetails(info) {
+  return {
+    id: info.id, title: info.title, name: info.name,
+    release_date: info.release_date, first_air_date: info.first_air_date,
+    last_air_date: info.last_air_date, status: info.status,
+    number_of_seasons: info.number_of_seasons, runtime: info.runtime,
+    vote_average: info.vote_average, poster_path: info.poster_path,
+    overview: info.overview, genres: info.genres,
+    imdb_id: info.imdb_id,
+    external_ids: info.external_ids ? { imdb_id: info.external_ids.imdb_id } : undefined,
+    credits: info.credits ? { cast: (info.credits.cast || []).slice(0, 6).map(person => ({
+      id: person.id, name: person.name, character: person.character,
+      profile_path: person.profile_path,
+    })) } : undefined,
+    videos: info.videos ? { results: (() => {
+      const youtube = (info.videos.results || []).filter(v => v.site === "YouTube")
+      const trailer = youtube.find(v => v.type === "Trailer")
+      // Keep the actual trailer even when TMDB lists many clips before it.
+      return (trailer ? [trailer, ...youtube.filter(v => v !== trailer)] : youtube)
+        .slice(0, 8).map(v => ({ key: v.key, site: v.site, type: v.type }))
+    })() } : undefined,
+  }
+}
+
+function loadTMDBDetailsFromSession() {
+  if (_tmdbDetailSessionLoaded) return
+  _tmdbDetailSessionLoaded = true
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(TMDB_DETAIL_SESSION_KEY) || "[]")
+    if (!Array.isArray(saved)) return
+    for (const entry of saved.slice(-TMDB_DETAIL_SESSION_LIMIT)) {
+      if (!entry || typeof entry.key !== "string" || entry.expiresAt <= Date.now() || !entry.value) continue
+      _tmdbDetailCache.set(entry.key, entry)
+    }
+  } catch (_) { /* Disabled storage: memory cache remains available. */ }
+}
+
+function cachedTMDBDetails(mediaType, tmdbId) {
+  loadTMDBDetailsFromSession()
+  const key = `${mediaType === "series" ? "series" : "movie"}:${Number(tmdbId)}`
+  const entry = _tmdbDetailCache.get(key)
+  if (!entry) return null
+  if (entry.expiresAt <= Date.now()) {
+    _tmdbDetailCache.delete(key)
+    return null
+  }
+  _tmdbDetailCache.delete(key)
+  _tmdbDetailCache.set(key, entry)
+  return entry.value
+}
+
+function storeTMDBDetails(mediaType, tmdbId, info) {
+  const key = `${mediaType}:${Number(tmdbId)}`
+  _tmdbDetailCache.delete(key)
+  _tmdbDetailCache.set(key, {
+    key, expiresAt: Date.now() + METADATA_DETAILS_TTL, value: compactTMDBDetails(info),
+  })
+  while (_tmdbDetailCache.size > TMDB_DETAIL_SESSION_LIMIT) {
+    _tmdbDetailCache.delete(_tmdbDetailCache.keys().next().value)
+  }
+  if (_tmdbDetailSaveTimer) return
+  _tmdbDetailSaveTimer = window.setTimeout(() => {
+    _tmdbDetailSaveTimer = null
+    try { sessionStorage.setItem(TMDB_DETAIL_SESSION_KEY, JSON.stringify([..._tmdbDetailCache.values()])) }
+    catch (_) { /* Browser storage can be disabled or full. */ }
+  }, 800)
+}
+
+function findSavedTMDBIdByTitle(title, year, mediaType) {
+  loadTMDBDetailsFromSession()
+  const normalized = normalizeAutoFillMatchText(title)
+  if (!normalized) return null
+  const desiredYear = Number(year) || 0
+  const prefix = mediaType === "series" ? "series:" : "movie:"
+  for (const [key, entry] of _tmdbDetailCache) {
+    if (!key.startsWith(prefix) || entry.expiresAt <= Date.now()) continue
+    const detail = entry.value
+    const candidateTitle = mediaType === "series" ? detail.name : detail.title
+    const releaseDate = mediaType === "series" ? detail.first_air_date : detail.release_date
+    const candidateYear = Number(String(releaseDate || "").slice(0, 4)) || 0
+    if (normalized === normalizeAutoFillMatchText(candidateTitle) &&
+        (!desiredYear || !candidateYear || desiredYear === candidateYear)) {
+      return Number(detail.id) || null
+    }
+  }
+  return null
+}
+
+async function fetchTMDBDetailById(mediaType, tmdbId) {
+  const type = mediaType === "series" ? "series" : "movie"
+  const id = Number(tmdbId)
+  if (!Number.isSafeInteger(id) || id <= 0) throw new Error("Invalid TMDB ID")
+  const cached = cachedTMDBDetails(type, id)
+  if (cached) return cached
+  const key = `${type}:${id}`
+  if (_tmdbDetailPending.has(key)) return _tmdbDetailPending.get(key)
+  const endpoint = type === "movie" ? "movie" : "tv"
+  const url = `${TMDB_BASE_URL}/${endpoint}/${id}?api_key=${TMDB_API_KEY}&language=en-US&append_to_response=credits,videos,external_ids`
+  const pending = fetchCachedMetadata(url, { ttl: METADATA_DETAILS_TTL })
+    .then(info => {
+      storeTMDBDetails(type, id, info)
+      return info
+    })
+    .finally(() => {
+      if (_tmdbDetailPending.get(key) === pending) _tmdbDetailPending.delete(key)
+    })
+  _tmdbDetailPending.set(key, pending)
+  return pending
+}
+
+const _detailPrefetchQueue = []
+const _detailPrefetchQueued = new Set()
+const _detailPrefetchActiveKeys = new Set()
+const _detailPrefetchRetryAfter = new Map()
+let _detailPrefetchActive = 0
+function prefetchTMDBDetail(mediaType, tmdbId, title = "", year = null) {
+  const type = mediaType === "series" ? "series" : "movie"
+  const id = Number(tmdbId) || 0
+  const cleanedTitle = normalizeMediaSearchTitle(title)
+  if ((!Number.isSafeInteger(id) || id <= 0) && !cleanedTitle) return
+  const key = id > 0
+    ? `${type}:${id}`
+    : `${type}:title:${cleanedTitle.toLowerCase()}:${year || ""}`
+  if ((id > 0 && (cachedTMDBDetails(type, id) || _tmdbDetailPending.has(key))) ||
+      _detailPrefetchQueued.has(key) || _detailPrefetchActiveKeys.has(key) ||
+      (_detailPrefetchRetryAfter.get(key) || 0) > Date.now() ||
+      _detailPrefetchQueue.length >= 12) return
+  _detailPrefetchQueued.add(key)
+  _detailPrefetchQueue.push({ type, id, key, title: cleanedTitle, year })
+  drainTMDBDetailPrefetch()
+}
+
+function drainTMDBDetailPrefetch() {
+  while (_detailPrefetchActive < 2 && _detailPrefetchQueue.length) {
+    const job = _detailPrefetchQueue.shift()
+    _detailPrefetchQueued.delete(job.key)
+    _detailPrefetchActiveKeys.add(job.key)
+    _detailPrefetchActive++
+    const request = job.id > 0
+      ? fetchTMDBDetailById(job.type, job.id)
+      : fetchTMDBDetails(job.title, job.year, job.type)
+    void request.then(result => {
+      // No matching search result should not be repeatedly requested on hover.
+      _detailPrefetchRetryAfter.set(job.key, Date.now() + (result ? 30 * 60_000 : 60_000))
+    }).catch(() => {
+      _detailPrefetchRetryAfter.set(job.key, Date.now() + 30_000)
+    }).finally(() => {
+      _detailPrefetchActiveKeys.delete(job.key)
+      _detailPrefetchActive--
+      drainTMDBDetailPrefetch()
+    })
+  }
+}
+
+function getIMDbId(details, mediaType) {
+  const id = mediaType === "series" ? details.external_ids?.imdb_id : details.imdb_id
+  return /^tt\d+$/.test(String(id || "")) ? id : null
+}
+
+function enrichIMDbRating(info, input, isStillCurrent) {
+  const id = info?._imdbId
+  if (!id || !input) return
+  const initialRating = String(info.rating)
+  const url = `https://www.omdbapi.com/?i=${encodeURIComponent(id)}&apikey=${OMDB_API_KEY}`
+  void fetchCachedMetadata(url, { ttl: METADATA_DETAILS_TTL, timeout: 6500 })
+    .then(data => {
+      const imdbRating = Number.parseFloat(data?.imdbRating)
+      if (Number.isFinite(imdbRating) && imdbRating >= 0 && imdbRating <= 10 &&
+          input.value === initialRating && isStillCurrent()) {
+        input.value = String(imdbRating)
+      }
+    })
+    .catch(() => { /* The available TMDB rating is already visible and usable. */ })
+}
+
 // ── Auth State ──
 let currentUser = null   // null = guest, otherwise authenticated public profile + token
 
@@ -160,18 +400,22 @@ let sortState = loadSortState()
 
 // ── Cache layer (avoids redundant network calls) ──
 const _cache = { data: null, ts: 0, TTL: 60_000 }   // 60s in-memory cache
+let _collectionFetchInFlight = null
+let _collectionFetchVersion = 0
+function invalidateCollectionFetch() {
+  _collectionFetchVersion++
+  _collectionFetchInFlight = null
+}
 const COLLECTION_SNAPSHOT_PREFIX = "cinema_collection_snapshot_v2"
 const COLLECTION_SNAPSHOT_MAX_AGE = 7 * 24 * 60 * 60 * 1000
 const RECOMMENDATION_SNAPSHOT_PREFIX = "cinema_recommendations_snapshot_v4"
-const RECOMMENDATION_SNAPSHOT_MAX_AGE = 3 * 24 * 60 * 60 * 1000
+const RECOMMENDATION_SNAPSHOT_MAX_AGE = 6 * 60 * 60 * 1000
 const recommendationState = {
   data: null,
   loadedAt: 0,
   loading: false,
   requestSerial: 0,
   renderSignature: "",
-  refinementTimer: null,
-  refinementAttempts: 0,
   itemMap: new Map(),
   mediaFilter: "all",
   sortMode: "priority",
@@ -182,10 +426,59 @@ const recommendationState = {
   searchDebounceTimer: null,
   searchCache: new Map(),
 }
+let recommendationPollTimer = null
+let recommendationPollAttempts = 0
+let recommendationPrewarmTimer = null
+
+// A poll only runs while For You is visible; completed recommendations remain
+// cached for subsequent visits with no extra loading or unnecessary rerenders.
+function clearRecommendationPoll() {
+  if (recommendationPollTimer) window.clearTimeout(recommendationPollTimer)
+  recommendationPollTimer = null
+  recommendationPollAttempts = 0
+}
+
+function scheduleRecommendationPoll(data) {
+  if (recommendationPollTimer) window.clearTimeout(recommendationPollTimer)
+  recommendationPollTimer = null
+  const waiting = Boolean(data?.meta?.pending_update)
+  const visible = document.getElementById("view-for-you")?.style.display !== "none"
+  if (!waiting || !visible || !currentUser || recommendationPollAttempts >= 28) return
+  const delay = Math.min(8000, 2200 + recommendationPollAttempts * 380)
+  recommendationPollTimer = window.setTimeout(() => {
+    recommendationPollTimer = null
+    recommendationPollAttempts++
+    void loadRecommendations({ poll: true, background: true })
+  }, delay)
+}
+
+// Quietly wake the backend's progressive recommendation cache after login so
+// the expensive ranking is often already finished before For You is opened.
+function scheduleRecommendationPrewarm() {
+  if (recommendationPrewarmTimer) window.clearTimeout(recommendationPrewarmTimer)
+  const username = currentUser?.username
+  if (!username) return
+  recommendationPrewarmTimer = window.setTimeout(async () => {
+    recommendationPrewarmTimer = null
+    if (!currentUser || currentUser.username !== username) return
+    try {
+      const response = await fetch(RECOMMENDATIONS_BASE_URL, { headers: authHeaders() })
+      if (!response.ok || !currentUser || currentUser.username !== username) return
+      const data = await response.json()
+      if (!data?.error && !recommendationState.data) {
+        recommendationState.data = data
+        recommendationState.loadedAt = Date.now()
+        if (!data.meta?.preview) saveRecommendationSnapshot(data)
+      }
+    } catch (_) { /* Background prewarm is optional and never blocks the UI. */ }
+  }, 1100)
+}
 
 function _cacheGet()          { return (Date.now() - _cache.ts < _cache.TTL) ? _cache.data : null }
 function _cacheSet(data)      { _cache.data = data; _cache.ts = Date.now() }
 function _cacheInvalidate() {
+  invalidateCollectionFetch()
+  _cache.data = null
   _cache.ts = 0
   _actorVaultCandidatesCache.clear()
   invalidateRecommendationClientCache()
@@ -255,20 +548,11 @@ function clearRecommendationSnapshot() {
   try { localStorage.removeItem(getRecommendationSnapshotKey()) } catch (_) {}
 }
 
-function clearRecommendationRefinementTimer() {
-  if (recommendationState.refinementTimer) clearTimeout(recommendationState.refinementTimer)
-  recommendationState.refinementTimer = null
-}
-
 function invalidateRecommendationClientCache() {
-  // Invalidate any in-flight GET before it can restore stale picks after editing a title.
-  recommendationState.requestSerial += 1
+  clearRecommendationPoll()
   recommendationState.data = null
   recommendationState.loadedAt = 0
-  recommendationState.loading = false
   recommendationState.renderSignature = ""
-  recommendationState.refinementAttempts = 0
-  clearRecommendationRefinementTimer()
   clearRecommendationSnapshot()
 }
 
@@ -289,6 +573,7 @@ function normaliseMediaItem(item = {}) {
 }
 
 function applyLocalMediaUpdate(mediaType, orderNumber, mediaData, serverItem = null) {
+  invalidateCollectionFetch()
   const source = Array.isArray(_cache.data)
     ? _cache.data
     : (readCollectionSnapshot() || [])
@@ -328,6 +613,7 @@ function applyLocalMediaUpdate(mediaType, orderNumber, mediaData, serverItem = n
 }
 
 function applyLocalMediaInsert(item) {
+  invalidateCollectionFetch()
   const source = Array.isArray(_cache.data)
     ? _cache.data
     : (readCollectionSnapshot() || [])
@@ -347,6 +633,7 @@ function applyLocalMediaInsert(item) {
 }
 
 function applyLocalMediaDelete(mediaType, orderNumber) {
+  invalidateCollectionFetch()
   const source = Array.isArray(_cache.data)
     ? _cache.data
     : (readCollectionSnapshot() || [])
@@ -521,6 +808,14 @@ async function fetchAllMedia({ showSkeleton = true, force = false } = {}) {
   const cached = _cacheGet()
   if (!force && cached) return cached
 
+  const ownerKey = getCollectionSnapshotKey()
+  const requestKey = `${ownerKey}|${sortState.field}|${sortState.direction}`
+  const fetchVersion = _collectionFetchVersion
+  if (_collectionFetchInFlight?.key === requestKey && _collectionFetchInFlight.version === fetchVersion) {
+    return _collectionFetchInFlight.promise
+  }
+
+  const runCollectionFetch = async () => {
   // Skeletons are a slow-network fallback, not the first thing the user sees.
   // A fast response finishes before this timer fires, so no loading flash occurs.
   let skeletonTimer = null
@@ -556,7 +851,10 @@ async function fetchAllMedia({ showSkeleton = true, force = false } = {}) {
 
     if (response.status === 401) {
       if (skeletonShown) hideSkeletons()
-      handleUnauthorized()
+      // A stale account's 401 must never sign out a newly signed-in user.
+      if (fetchVersion === _collectionFetchVersion && getCollectionSnapshotKey() === ownerKey) {
+        handleUnauthorized()
+      }
       return []
     }
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
@@ -564,18 +862,33 @@ async function fetchAllMedia({ showSkeleton = true, force = false } = {}) {
     if (skeletonShown) hideSkeletons()
     if (!Array.isArray(data)) return []
     const normalised = data.map(normaliseMediaItem)
+    if (fetchVersion !== _collectionFetchVersion || getCollectionSnapshotKey() !== ownerKey) {
+      return Array.isArray(_cache.data) ? _cache.data : []
+    }
     _cacheSet(normalised)
     saveCollectionSnapshot(normalised)
     return normalised
   } catch(error) {
     stopSkeletonTimer()
     if (skeletonShown) hideSkeletons()
+    if (fetchVersion !== _collectionFetchVersion || getCollectionSnapshotKey() !== ownerKey) {
+      return Array.isArray(_cache.data) ? _cache.data : []
+    }
     if (Array.isArray(cached) && cached.length) {
       showToast("Showing your saved collection while the server reconnects", "info")
       return cached
     }
-    showToast(`Error fetching media: ${error.message}`, "error")
+    if (fetchVersion === _collectionFetchVersion) {
+      showToast(`Error fetching media: ${error.message}`, "error")
+    }
     return []
+  }
+  }
+  const promise = runCollectionFetch()
+  _collectionFetchInFlight = { key: requestKey, version: fetchVersion, promise }
+  try { return await promise }
+  finally {
+    if (_collectionFetchInFlight?.promise === promise) _collectionFetchInFlight = null
   }
 }
 
@@ -697,7 +1010,6 @@ async function init() {
   // Apply the saved theme before any network work, so refresh never flashes the opposite theme.
   applySavedTheme()
   themeCheckbox.addEventListener("change", toggleTheme)
-  initProfileUI()
 
   initFancySearchSelects()
   updateEndYearVisibility()
@@ -746,6 +1058,11 @@ async function init() {
     }
   })
   autoFillBtn.addEventListener("click", fetchMediaInfo)
+  titleInput.addEventListener("input", scheduleAutoFillSearchPrefetch)
+  mediaTypeSelect.addEventListener("change", scheduleAutoFillSearchPrefetch)
+  document.addEventListener("pointerover", prefetchDetailFromCard, { passive: true })
+  document.addEventListener("focusin", prefetchDetailFromCard)
+  document.addEventListener("touchstart", prefetchDetailFromCard, { passive: true })
   titleInput.addEventListener("keydown", event => {
     if (event.key !== "Enter" || event.isComposing) return
     event.preventDefault()
@@ -789,7 +1106,6 @@ async function init() {
   })
 
   await initialCollectionLoad
-  warmRecommendationFeed()
 }
 
 // ── Accordion toggle for Personal Notes section ──
@@ -1476,7 +1792,7 @@ function renderActorSuggestions(people, query) {
       ${people.map((person, index) => {
         const preview = getActorVaultPreview(person) || "Titles available in your vault"
         const photo = person.profile_path
-          ? `<img src="${TMDB_IMAGE_URL}${person.profile_path}" alt="" loading="lazy">`
+          ? `<img src="${escapeHtml(mediaImageSize(`${TMDB_IMAGE_URL}${person.profile_path}`, 185))}" alt="" loading="lazy" decoding="async">`
           : `<span class="actor-suggestion-ph"><i class="fas fa-user"></i></span>`
         return `
           <button type="button" class="actor-suggestion-card" data-actor-index="${index}" role="option">
@@ -1765,7 +2081,7 @@ function renderActorMatchBanner(actor, options = {}) {
   }
 
   if (actor.profile_path) {
-    actorMatchPhoto.innerHTML = `<img src="${TMDB_IMAGE_URL}${actor.profile_path}" alt="${escapeHtml(actor.name)}">`
+    actorMatchPhoto.innerHTML = `<img src="${escapeHtml(mediaImageSize(`${TMDB_IMAGE_URL}${actor.profile_path}`, 185))}" alt="${escapeHtml(actor.name)}">`
   } else {
     actorMatchPhoto.innerHTML = `<i class="fas fa-user"></i>`
   }
@@ -2021,7 +2337,7 @@ function buildMediaCard(item, index) {
     </div>
     <div class="card-poster-wrap">
       ${hasPoster
-        ? `<img src="${item.poster_url}" alt="${escapeHtml(item.title)}" class="card-poster-img" loading="lazy">`
+        ? `<img src="${escapeHtml(mediaImageSize(item.poster_url, 342))}" alt="${escapeHtml(item.title)}" class="card-poster-img" loading="${index < 6 ? "eager" : "lazy"}" decoding="async" fetchpriority="${index < 3 ? "high" : "low"}" width="342" height="513">`
         : `<div class="card-poster-ph"><i class="fas fa-${item.media_type === "movie" ? "film" : "tv"}"></i></div>`
       }
       <div class="card-overlay">
@@ -2100,6 +2416,22 @@ function updateCardGrid(results, options = {}) {
   // First paint includes the visible area plus a generous buffer.
   _renderCardBatch(grid, getInitialCardBatchSize(grid))
 
+  // Warm just two visible titles while the browser is idle. Opening one of the
+  // first cards usually reuses an already-completed detail lookup (also works
+  // for imported legacy entries that do not yet have a TMDB ID).
+  const warmFirstDetails = () => {
+    if (renderGeneration !== _cardRenderGeneration ||
+        document.getElementById("view-collection")?.style.display === "none") return
+    results.slice(0, 2).forEach(item => {
+      prefetchTMDBDetail(item.media_type, item.tmdb_id, item.title, item.release_year)
+    })
+  }
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(warmFirstDetails, { timeout: 1100 })
+  } else {
+    window.setTimeout(warmFirstDetails, 600)
+  }
+
   // Sentinel for infinite scroll
   if (_cardRendered < _cardPool.length) {
     const sentinel = document.createElement("div")
@@ -2160,18 +2492,18 @@ window.toggleCardSelection = toggleCardSelection
 // ════════════════════════════════════════════════
 
 function updateStats(results) {
-  // Always show complete vault totals, even if a search or type filter is active.
-  const items = currentUser && _cache.ts > 0 && Array.isArray(_cache.data) ? _cache.data : results
-  let movieCount = 0
-  let seriesCount = 0
-  for (const item of items) {
-    if (item.media_type === "movie") movieCount += 1
-    else if (item.media_type === "series") seriesCount += 1
+  // Counts represent the whole collection, not just a filtered search page.
+  const source = Array.isArray(_cache.data) ? _cache.data : results
+  let movies = 0
+  let series = 0
+  for (const item of source || []) {
+    if (item.media_type === "movie") movies++
+    else if (item.media_type === "series") series++
   }
-  const moviesEl = document.getElementById("stat-movies")
-  const seriesEl = document.getElementById("stat-series")
-  if (moviesEl) moviesEl.textContent = movieCount.toLocaleString()
-  if (seriesEl) seriesEl.textContent = seriesCount.toLocaleString()
+  const movieCount = document.getElementById("stat-movies")
+  const seriesCount = document.getElementById("stat-series")
+  if (movieCount) movieCount.textContent = movies.toLocaleString()
+  if (seriesCount) seriesCount.textContent = series.toLocaleString()
 }
 
 // ════════════════════════════════════════════════
@@ -2182,22 +2514,35 @@ function updateStats(results) {
 async function fetchTMDBDetails(title, year, mediaType, knownTmdbId = null) {
   try {
     const endpoint = mediaType === "movie" ? "movie" : "tv"
-    let id = Number(knownTmdbId) || 0
+    let id = Number(knownTmdbId) || findSavedTMDBIdByTitle(title, year, mediaType) || 0
     if (!id) {
-      const yearParam = mediaType === "movie" ? `&year=${year}` : `&first_air_date_year=${year}`
-      const searchRes = await fetch(
-        `${TMDB_BASE_URL}/search/${endpoint}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(title)}${yearParam}`
-      )
-      const searchData = await searchRes.json()
+      const searchParams = new URLSearchParams({
+        api_key: TMDB_API_KEY, query: String(title || ""), language: "en-US",
+      })
+      const numericYear = Number(year)
+      if (numericYear >= 1900 && numericYear <= 2200) {
+        searchParams.set(mediaType === "movie" ? "year" : "first_air_date_year", String(numericYear))
+      }
+      const searchData = await fetchCachedMetadata(`${TMDB_BASE_URL}/search/${endpoint}?${searchParams}`)
       if (!searchData.results?.length) return null
-      id = searchData.results[0].id
+      id = Number(searchData.results[0].id) || 0
     }
-    const detRes = await fetch(
-      `${TMDB_BASE_URL}/${endpoint}/${id}?api_key=${TMDB_API_KEY}&append_to_response=credits,videos`
-    )
-    return await detRes.json()
-  } catch { return null }
+    return id ? await fetchTMDBDetailById(mediaType, id) : null
+  } catch (_) { return null }
 }
+
+function prefetchDetailFromCard(event) {
+  const card = event.target?.closest?.(".media-card, .recommendation-card")
+  if (!card) return
+  let item = null
+  if (card.classList.contains("media-card")) {
+    item = currentResults[Number(card.dataset.index)]
+  } else {
+    item = recommendationState.itemMap.get(card.dataset.recKey)
+  }
+  if (item) prefetchTMDBDetail(item.media_type, item.tmdb_id, item.title, item.release_year)
+}
+
 
 function showDetailModal(item) {
   const overlay = document.getElementById("detail-modal")
@@ -2219,10 +2564,24 @@ function showDetailModal(item) {
   const bgBlur   = document.getElementById("detail-bg-blur")
 
   if (isDisplayablePosterSource(item.poster_url)) {
-    poster.src = item.poster_url
+    const quickPoster = mediaImageSize(item.poster_url, 342)
+    poster.src = quickPoster
+    poster.decoding = "async"
+    poster.fetchPriority = "high"
     poster.style.display = "block"
     posterPh.style.display = "none"
-    bgBlur.style.backgroundImage = `url(${item.poster_url})`
+    bgBlur.style.backgroundImage = `url(${JSON.stringify(quickPoster)})`
+    // Upgrade only the detail poster in the background; do not delay opening.
+    if (quickPoster !== item.poster_url) {
+      const fullPoster = new Image()
+      fullPoster.decoding = "async"
+      fullPoster.onload = () => {
+        if (detailSerial === detailRequestSerial && overlay.style.display === "flex") {
+          poster.src = item.poster_url
+        }
+      }
+      fullPoster.src = item.poster_url
+    }
   } else {
     poster.style.display = "none"
     posterPh.style.display = "flex"
@@ -2376,7 +2735,7 @@ function showDetailModal(item) {
         <button type="button" class="cast-chip" onclick="openActorProfile(${Number(c.id)})"
           aria-label="Open ${escapeHtml(c.name)} profile" title="${escapeHtml(c.character ? `${c.name} as ${c.character}` : `View ${c.name} profile`)}">
           ${c.profile_path
-            ? `<img src="${TMDB_IMAGE_URL + c.profile_path}" onerror="this.style.display='none'" class="cast-img" alt="">`
+            ? `<img src="${escapeHtml(mediaImageSize(TMDB_IMAGE_URL + c.profile_path, 185))}" onerror="this.style.display='none'" class="cast-img" alt="" loading="lazy" decoding="async">`
             : `<span class="cast-img cast-img-placeholder"><i class="fas fa-user"></i></span>`}
           <span class="cast-chip-copy">
             <strong>${escapeHtml(c.name)}</strong>
@@ -2818,7 +3177,7 @@ function renderActorVaultShowcase() {
   grid.innerHTML = visible.map(({ credit, vaultItem }) => {
     const posterUrl = vaultItem.poster_url || (credit.poster_path ? `${TMDB_IMAGE_URL}${credit.poster_path}` : "")
     const poster = posterUrl
-      ? `<img src="${escapeHtml(posterUrl)}" alt="${escapeHtml(vaultItem.title || credit._title)}" loading="lazy">`
+      ? `<img src="${escapeHtml(mediaImageSize(posterUrl, 185))}" alt="${escapeHtml(vaultItem.title || credit._title)}" loading="lazy" decoding="async">`
       : `<span class="actor-vault-card-ph"><i class="fas ${credit._mediaType === "series" ? "fa-tv" : "fa-film"}"></i></span>`
     const year = vaultItem.release_year || credit._year || "—"
     const rating = Number(vaultItem.rating || credit._rating || 0)
@@ -2842,7 +3201,7 @@ function renderActorVaultShowcase() {
 
 function renderActorHighlight(credit) {
   const poster = credit.poster_path
-    ? `<img src="${TMDB_IMAGE_URL}${credit.poster_path}" alt="" loading="lazy">`
+    ? `<img src="${escapeHtml(mediaImageSize(`${TMDB_IMAGE_URL}${credit.poster_path}`, 185))}" alt="" loading="lazy" decoding="async">`
     : `<span class="actor-highlight-ph"><i class="fas ${credit._mediaType === "series" ? "fa-tv" : "fa-film"}"></i></span>`
   return `
     <button type="button" class="actor-highlight" data-actor-work-key="${escapeHtml(credit._key)}">
@@ -2869,7 +3228,7 @@ function renderActorFilmography() {
     grid.innerHTML = visible.map(credit => {
       const vaultItem = findVaultItemForActorCredit(credit)
       const poster = credit.poster_path
-        ? `<img src="${TMDB_IMAGE_URL}${credit.poster_path}" alt="${escapeHtml(credit._title)}" loading="lazy">`
+        ? `<img src="${escapeHtml(mediaImageSize(`${TMDB_IMAGE_URL}${credit.poster_path}`, 185))}" alt="${escapeHtml(credit._title)}" loading="lazy" decoding="async">`
         : `<span class="actor-work-poster-ph"><i class="fas ${credit._mediaType === "series" ? "fa-tv" : "fa-film"}"></i></span>`
       const character = credit._character ? escapeHtml(credit._character) : "Cast"
       const rating = credit._rating > 0 ? `<span><i class="fas fa-star"></i>${credit._rating.toFixed(1)}</span>` : ""
@@ -3440,7 +3799,7 @@ function buildRecommendationCard(item) {
   }
 
   const posterHtml = item.poster_url
-    ? `<img src="${escapeHtml(item.poster_url)}" alt="${escapeHtml(item.title)} poster" loading="lazy" decoding="async" />`
+    ? `<img src="${escapeHtml(mediaImageSize(item.poster_url, 342))}" alt="${escapeHtml(item.title)} poster" loading="lazy" decoding="async" width="342" height="513" />`
     : `<div class="rec-poster-placeholder"><i class="fas fa-photo-film"></i></div>`
 
   article.innerHTML = `
@@ -3743,6 +4102,7 @@ function renderRecommendations(data, { force = false } = {}) {
   const signature = recommendationPayloadSignature(data)
   if (!force && signature === recommendationState.renderSignature) {
     recommendationState.data = data
+    syncRecommendationBuildProgress(data)
     return
   }
 
@@ -3762,9 +4122,7 @@ function renderRecommendations(data, { force = false } = {}) {
   if (watchedEl) watchedEl.textContent = Number(profile.watched_count) || 0
   if (vaultEl) vaultEl.textContent = Number(profile.vault_total) || 0
   if (progressEl) progressEl.textContent = Number(profile.tracked_series_progress) || 0
-  if (updatedEl) updatedEl.textContent = data.meta?.background_refreshing
-    ? `${formatRecommendationUpdatedAt(data.generated_at)} · Refining picks in background…`
-    : formatRecommendationUpdatedAt(data.generated_at)
+  if (updatedEl) updatedEl.textContent = formatRecommendationUpdatedAt(data.generated_at)
 
   const searchSection = document.getElementById("rec-section-search")
   if (searchSection) searchSection.hidden = true
@@ -3787,15 +4145,19 @@ function renderRecommendations(data, { force = false } = {}) {
   const empty = document.getElementById("recommendations-empty")
   if (empty) empty.hidden = true
   const filterEmpty = document.getElementById("recommendations-filter-empty")
-  if (filterEmpty) {
-    filterEmpty.hidden = total !== 0 || Boolean(data.meta?.background_refreshing)
-  }
-  if (data.meta?.background_refreshing && total === 0 && Number(profile.vault_total) > 0) {
-    // No finished quick picks yet: keep the skeleton until the full feed arrives.
-    if (content) content.hidden = true
-    setRecommendationsLoading(true)
-  }
+  if (filterEmpty) filterEmpty.hidden = total !== 0
   updateRecommendationToolbarSummary(topFeed.length)
+  syncRecommendationBuildProgress(data)
+}
+
+function syncRecommendationBuildProgress(data) {
+  const isPreview = Boolean(data?.meta?.preview)
+  const building = Boolean(data?.meta?.pending_update)
+  const updatedEl = document.getElementById("recommendations-updated-label")
+  if (updatedEl) updatedEl.textContent = isPreview
+    ? building ? "Quick picks ready · refining your personal recommendations…" : "Quick picks · refresh to try the full recommendations again"
+    : building ? "Showing your picks · refreshing in the background…" : formatRecommendationUpdatedAt(data.generated_at)
+  setRecommendationsLoading(isPreview && building)
 }
 
 function getVaultItemForRecommendation(item) {
@@ -3892,84 +4254,17 @@ function handleRecommendationClick(event) {
   else openRecommendationItem(item)
 }
 
-function recommendationViewVisible() {
-  return document.getElementById("view-for-you")?.style.display === "block"
-}
-
-// The server supplies a small fast feed while it finishes exhaustive series and
-// relationship checks. Poll cached results only while For You is visible.
-function scheduleRecommendationRefinement() {
-  clearRecommendationRefinementTimer()
-  if (!currentUser || !recommendationViewVisible() ||
-      !recommendationState.data?.meta?.background_refreshing ||
-      recommendationState.refinementAttempts >= 20) return
-  const delay = Math.min(12000, 3000 + recommendationState.refinementAttempts * 1200)
-  recommendationState.refinementTimer = setTimeout(async () => {
-    recommendationState.refinementTimer = null
-    if (!currentUser || !recommendationViewVisible()) return
-    if (recommendationState.loading) {
-      scheduleRecommendationRefinement()
-      return
-    }
-    const serial = recommendationState.requestSerial
-    const account = currentUser.id || currentUser.username
-    recommendationState.refinementAttempts += 1
-    try {
-      const response = await fetch(RECOMMENDATIONS_BASE_URL, { headers: authHeaders() })
-      if (serial !== recommendationState.requestSerial ||
-          account !== (currentUser?.id || currentUser?.username)) return
-      if (response.status === 401) { handleUnauthorized(); return }
-      if (!response.ok) throw new Error(`Refinement check returned ${response.status}`)
-      const data = await response.json()
-      if (!data || data.error) throw new Error(data?.error || "Invalid recommendations")
-      const oldData = recommendationState.data
-      const changed = data.generated_at !== oldData?.generated_at ||
-        data.meta?.result_stage !== oldData?.meta?.result_stage ||
-        Boolean(data.meta?.background_refreshing) !== Boolean(oldData?.meta?.background_refreshing)
-      recommendationState.data = data
-      recommendationState.loadedAt = Date.now()
-      if (changed) {
-        saveRecommendationSnapshot(data)
-        if (recommendationViewVisible()) renderRecommendations(data, { force: true })
-      }
-    } catch (error) {
-      console.warn("Recommendation refinement is still pending:", error)
-    }
-    if (recommendationState.data?.meta?.background_refreshing) scheduleRecommendationRefinement()
-  }, delay)
-}
-
-// Pre-warm recommendations only when the user's collection request has settled.
-// Never build an invisible card grid: that would slow down the Collection tab.
-function warmRecommendationFeed() {
-  if (!currentUser || recommendationState.loading || recommendationState.data) return
-  const loadInIdle = () => {
-    if (currentUser && !recommendationState.loading && !recommendationState.data)
-      void loadRecommendations({ background: true, prefetch: true })
-  }
-  if (typeof window.requestIdleCallback === "function")
-    window.requestIdleCallback(loadInIdle, { timeout: 2000 })
-  else setTimeout(loadInIdle, 950)
-}
-
-async function loadRecommendations({ force = false, background = false, prefetch = false } = {}) {
+async function loadRecommendations({ force = false, background = false, poll = false } = {}) {
   if (!currentUser) {
-    if (!prefetch) openAuthModal("login")
+    openAuthModal("login")
     return
   }
-  if (recommendationState.loading && !force) {
-    if (!prefetch && recommendationState.data && recommendationViewVisible())
-      renderRecommendations(recommendationState.data)
-    else if (!prefetch && !recommendationState.data) setRecommendationsLoading(true)
-    return
-  }
+  if (recommendationState.loading && !force) return
 
   const now = Date.now()
-  if (!force && recommendationState.data && now - recommendationState.loadedAt < 3 * 60_000) {
-    if (recommendationViewVisible()) {
-      renderRecommendations(recommendationState.data)
-      scheduleRecommendationRefinement()
-    }
+  if (!force && !poll && recommendationState.data && now - recommendationState.loadedAt < 5 * 60_000) {
+    renderRecommendations(recommendationState.data)
+    scheduleRecommendationPoll(recommendationState.data)
     return
   }
 
@@ -3977,9 +4272,8 @@ async function loadRecommendations({ force = false, background = false, prefetch
     const snapshot = readRecommendationSnapshot()
     if (snapshot) {
       recommendationState.data = snapshot
-      const lastUpdated = Date.parse(snapshot.generated_at)
-      recommendationState.loadedAt = Number.isFinite(lastUpdated) ? lastUpdated : 0
-      if (!prefetch && recommendationViewVisible()) renderRecommendations(snapshot, { force: true })
+      recommendationState.loadedAt = now - 10 * 60_000
+      renderRecommendations(snapshot, { force: true })
       background = true
     }
   }
@@ -3987,51 +4281,56 @@ async function loadRecommendations({ force = false, background = false, prefetch
   const serial = ++recommendationState.requestSerial
   recommendationState.loading = true
   const refreshBtn = document.getElementById("recommendations-refresh-btn")
-  if (refreshBtn && !prefetch) {
+  if (refreshBtn) {
     refreshBtn.disabled = true
     refreshBtn.classList.add("is-loading")
   }
 
   let loadingTimer = null
-  if (!background && !prefetch && !recommendationState.data) {
-    loadingTimer = window.setTimeout(() => setRecommendationsLoading(true), 280)
+  if (!background && !recommendationState.data) {
+    loadingTimer = window.setTimeout(() => setRecommendationsLoading(true), 450)
   }
 
   try {
     const url = `${RECOMMENDATIONS_BASE_URL}${force ? "?refresh=1" : ""}`
     const response = await fetch(url, { headers: authHeaders() })
     if (serial !== recommendationState.requestSerial) return
-    if (response.status === 401) { handleUnauthorized(); return }
+    if (response.status === 401) {
+      handleUnauthorized()
+      return
+    }
     if (!response.ok) throw new Error(`Recommendation service returned ${response.status}`)
     const data = await response.json()
     if (data?.error) throw new Error(data.error)
 
     recommendationState.data = data
     recommendationState.loadedAt = Date.now()
-    recommendationState.refinementAttempts = 0
-    saveRecommendationSnapshot(data)
-    if (recommendationViewVisible()) {
-      renderRecommendations(data, { force: true })
-      scheduleRecommendationRefinement()
+    // Never overwrite a complete local snapshot with an incomplete stage.
+    if (!data.meta?.preview) saveRecommendationSnapshot(data)
+    renderRecommendations(data, { force })
+    if (!data.meta?.preview && !data.meta?.pending_update) {
+      clearRecommendationPoll()
+    } else {
+      scheduleRecommendationPoll(data)
     }
   } catch (error) {
     if (serial !== recommendationState.requestSerial) return
     console.error("Recommendation loading failed:", error)
-    if (!recommendationState.data && !prefetch) {
+    if (!recommendationState.data) {
       const errorBox = document.getElementById("recommendations-error")
       const errorMessage = document.getElementById("recommendations-error-message")
       const content = document.getElementById("recommendations-content")
       if (errorBox) errorBox.hidden = false
       if (errorMessage) errorMessage.textContent = "The recommendation engine could not connect right now. Your collection is unaffected."
       if (content) content.hidden = true
-    } else if (force && !prefetch) {
+    } else if (force) {
       showToast("Could not refresh picks — keeping your last recommendations", "info")
     }
   } finally {
     if (loadingTimer) window.clearTimeout(loadingTimer)
     if (serial === recommendationState.requestSerial) {
       recommendationState.loading = false
-      if (!prefetch) setRecommendationsLoading(false)
+      setRecommendationsLoading(Boolean(recommendationState.data?.meta?.preview && recommendationState.data?.meta?.pending_update))
       if (refreshBtn) {
         refreshBtn.disabled = false
         refreshBtn.classList.remove("is-loading")
@@ -4108,7 +4407,7 @@ window.loadRecommendations = loadRecommendations
 
 function switchView(view) {
   // Guests can't add media or open private personalized/social features.
-  if ((view === "add" || view === "social" || view === "for-you") && !currentUser) {
+  if ((view === "add" || view === "social" || view === "for-you" || view === "profile") && !currentUser) {
     openAuthModal("login")
     const message = view === "social"
       ? "Please sign in to connect with friends"
@@ -4131,7 +4430,6 @@ function switchView(view) {
     "for-you": document.getElementById("nav-for-you"),
     add: document.getElementById("nav-add"),
     social: document.getElementById("nav-social"),
-    profile: document.getElementById("profile-open-btn"),
   }
 
   Object.entries(views).forEach(([key, element]) => {
@@ -4141,16 +4439,19 @@ function switchView(view) {
     element?.classList.toggle("active", key === view)
   })
 
+  document.getElementById("user-profile-link")?.classList.toggle("active", view === "profile")
   if (view === "add") {
     views.add?.querySelector(".personal-section")?.classList.remove("personal-section--open")
-    // Focus the title on every visit, including when opening from a recommendation.
-    requestAnimationFrame(() => titleInput?.focus({ preventScroll: true }))
+    // Focus after the view is displayed, without scrolling the page unexpectedly.
+    requestAnimationFrame(() => {
+      if (views.add?.style.display !== "none") titleInput?.focus({ preventScroll: true })
+    })
   }
-  if (view === "profile") syncProfileForm()
+  if (view === "profile") syncAccountProfileView()
   if (view === "for-you") {
     void loadRecommendations()
   } else {
-    clearRecommendationRefinementTimer()
+    clearRecommendationPoll()
   }
   if (view === "social") {
     closeFriendVault({ silent: true })
@@ -4440,58 +4741,102 @@ function scoreAutoFillCandidate(candidate, searchTitle, mediaType, preferredYear
 
 async function fetchAutoFillSearchPage(query, mediaType) {
   const endpoint = mediaType === "movie" ? "movie" : "tv"
-  const url = `${TMDB_BASE_URL}/search/${endpoint}?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(query)}&language=en-US&include_adult=false&page=1`
-  const response = await fetch(url)
-  if (!response.ok) throw new Error(`TMDB search failed (${response.status})`)
-  const data = await response.json()
+  const params = new URLSearchParams({
+    api_key: TMDB_API_KEY, query, language: "en-US", include_adult: "false", page: "1",
+  })
+  const data = await fetchCachedMetadata(`${TMDB_BASE_URL}/search/${endpoint}?${params}`)
   return Array.isArray(data.results) ? data.results : []
+}
+
+async function fetchAutoFillMultiSearch(query) {
+  const params = new URLSearchParams({
+    api_key: TMDB_API_KEY, query, language: "en-US", include_adult: "false", page: "1",
+  })
+  const data = await fetchCachedMetadata(`${TMDB_BASE_URL}/search/multi?${params}`)
+  return (Array.isArray(data.results) ? data.results : [])
+    .filter(item => item.media_type === "movie" || item.media_type === "tv")
+    .map(item => ({ ...item, _autoFillMediaType: item.media_type === "tv" ? "series" : "movie" }))
 }
 
 async function searchAutoFillCandidates(searchTitle, preferredMediaType) {
   const queries = buildAutoFillSearchQueries(searchTitle)
   if (!queries.length) return []
-
   const preferredYearMatch = String(searchTitle || "").match(/\b(19\d{2}|20\d{2})\b/)
-  const preferredYear = preferredYearMatch ? parseInt(preferredYearMatch[1]) : null
-  const mediaTypes = preferredMediaType === "series" ? ["series", "movie"] : ["movie", "series"]
-  const searches = queries.flatMap(query => mediaTypes.map(mediaType => ({ query, mediaType })))
-  const settledSearches = await Promise.allSettled(searches.map(async search => ({
-    ...search,
-    results: await fetchAutoFillSearchPage(search.query, search.mediaType),
-  })))
-  const resultGroups = settledSearches
-    .filter(result => result.status === "fulfilled")
-    .map(result => result.value)
+  const preferredYear = preferredYearMatch ? Number(preferredYearMatch[1]) : null
+  const deduped = new Map()
+  let firstError = null
 
-  if (!resultGroups.length) {
-    const firstError = settledSearches.find(result => result.status === "rejected")
-    throw firstError?.reason || new Error("TMDB search failed")
+  function addCandidates(items) {
+    for (const candidate of items) {
+      const mediaType = candidate._autoFillMediaType
+      const id = Number(candidate.id)
+      const key = `${mediaType}:${id}`
+      if (id > 0 && (mediaType === "movie" || mediaType === "series") && !deduped.has(key)) {
+        deduped.set(key, candidate)
+      }
+    }
   }
 
-  const deduped = new Map()
+  // A combined TMDB search returns movies and TV in ONE request. File-name fallback
+  // queries (when needed) are made concurrently, not one after another.
+  const searches = await Promise.allSettled(queries.map(fetchAutoFillMultiSearch))
+  for (const result of searches) {
+    if (result.status === "fulfilled") addCandidates(result.value)
+    else firstError ||= result.reason
+  }
 
-  resultGroups.forEach(group => {
-    group.results.forEach(candidate => {
-      const id = Number(candidate?.id)
-      const key = `${group.mediaType}:${id}`
-      if (!id || deduped.has(key)) return
-      deduped.set(key, { ...candidate, _autoFillMediaType: group.mediaType })
-    })
-  })
-
+  const preferred = preferredMediaType === "series" ? "series" : "movie"
   const matchQuery = queries[queries.length - 1]
-  return [...deduped.values()]
-    .map(candidate => ({
-      ...candidate,
-      _autoFillScore:
-        scoreAutoFillCandidate(candidate, matchQuery, candidate._autoFillMediaType, preferredYear) +
-        (candidate._autoFillMediaType === preferredMediaType ? 40 : 0),
-    }))
-    .sort((a, b) => {
-      if (b._autoFillScore !== a._autoFillScore) return b._autoFillScore - a._autoFillScore
-      return (Number(b.popularity) || 0) - (Number(a.popularity) || 0)
-    })
+  let candidates = [...deduped.values()]
+  const bestPreferredMatch = candidates
+    .filter(item => item._autoFillMediaType === preferred)
+    .reduce((best, item) => Math.max(best, scoreAutoFillCandidate(item, matchQuery, preferred, preferredYear)), 0)
+
+  // Multi-search sometimes omits less popular exact titles. Recover the original
+  // dedicated movie/TV search only for weak or missing results to preserve accuracy.
+  if (!candidates.length || bestPreferredMatch < 5500) {
+    const types = [preferred, preferred === "movie" ? "series" : "movie"]
+    const fallbacks = await Promise.allSettled(types.map(async type => ({
+      type, results: await fetchAutoFillSearchPage(matchQuery, type),
+    })))
+    for (const result of fallbacks) {
+      if (result.status === "fulfilled") {
+        addCandidates(result.value.results.map(item => ({
+          ...item, _autoFillMediaType: result.value.type,
+        })))
+      } else firstError ||= result.reason
+    }
+    candidates = [...deduped.values()]
+  }
+
+  if (!candidates.length && searches.every(result => result.status === "rejected")) {
+    throw firstError || new Error("TMDB search failed")
+  }
+
+  return candidates.map(candidate => ({
+    ...candidate,
+    _autoFillScore:
+      scoreAutoFillCandidate(candidate, matchQuery, candidate._autoFillMediaType, preferredYear) +
+      (candidate._autoFillMediaType === preferred ? 40 : 0),
+  })).sort((a, b) => {
+    if (b._autoFillScore !== a._autoFillScore) return b._autoFillScore - a._autoFillScore
+    return (Number(b.popularity) || 0) - (Number(a.popularity) || 0)
+  })
 }
+
+let _autoFillPrefetchTimer = null
+function scheduleAutoFillSearchPrefetch() {
+  window.clearTimeout(_autoFillPrefetchTimer)
+  const title = titleInput?.value.trim() || ""
+  if (title.length < 4) return
+  const mediaType = mediaTypeSelect.value
+  _autoFillPrefetchTimer = window.setTimeout(() => {
+    if (document.getElementById("view-add")?.style.display === "none") return
+    // The Auto-Fill click will reuse this very same pending request or its cache.
+    void searchAutoFillCandidates(title, mediaType).catch(() => {})
+  }, 420)
+}
+
 
 function ensureAutoFillResultsModal() {
   let modal = document.getElementById("auto-fill-results-modal")
@@ -4516,6 +4861,12 @@ function ensureAutoFillResultsModal() {
 
   document.body.appendChild(modal)
   modal.querySelector(".auto-fill-results-close")?.addEventListener("click", closeAutoFillResults)
+  modal.addEventListener("pointerover", event => {
+    const button = event.target.closest?.("[data-auto-fill-result-index]")
+    if (!button) return
+    const candidate = autoFillCandidates[Number(button.dataset.autoFillResultIndex)]
+    if (candidate) prefetchTMDBDetail(candidate._autoFillMediaType, candidate.id)
+  }, { passive: true })
   modal.addEventListener("click", event => {
     if (event.target === modal) {
       closeAutoFillResults()
@@ -4556,7 +4907,7 @@ function showAutoFillResults(candidates, searchTitle) {
     const rating = Number(candidate.vote_average) > 0 ? Number(candidate.vote_average).toFixed(1) : "—"
     const overview = candidate.overview || "No description available."
     const poster = candidate.poster_path
-      ? `<img src="${TMDB_IMAGE_URL}${candidate.poster_path}" alt="" loading="lazy">`
+      ? `<img src="${escapeHtml(mediaImageSize(`${TMDB_IMAGE_URL}${candidate.poster_path}`, 185))}" alt="" loading="${index < 4 ? "eager" : "lazy"}" decoding="async" width="185" height="278">`
       : `<span class="auto-fill-result-no-poster"><i class="fas fa-photo-film"></i></span>`
     const originalLine = originalTitle && normalizeAutoFillMatchText(originalTitle) !== normalizeAutoFillMatchText(title)
       ? `<span class="auto-fill-result-original">${escapeHtml(originalTitle)}</span>`
@@ -4582,6 +4933,10 @@ function showAutoFillResults(candidates, searchTitle) {
   modal.dataset.previousBodyOverflow = document.body.style.overflow || ""
   document.body.style.overflow = "hidden"
   requestAnimationFrame(() => modal.querySelector(".auto-fill-result-card")?.focus({ preventScroll: true }))
+  // Warm only the two highest-ranked titles; do not flood the external API.
+  window.setTimeout(() => candidates.slice(0, 2).forEach(candidate => {
+    prefetchTMDBDetail(candidate._autoFillMediaType, candidate.id)
+  }), 100)
 }
 
 function closeAutoFillResults() {
@@ -4593,74 +4948,47 @@ function closeAutoFillResults() {
 }
 
 async function fetchMovieInfoByTmdbId(tmdbId) {
-  const detailsUrl = `${TMDB_BASE_URL}/movie/${tmdbId}?api_key=${TMDB_API_KEY}&language=en-US`
-  const detailsResponse = await fetch(detailsUrl)
-  if (!detailsResponse.ok) throw new Error(`TMDB details failed (${detailsResponse.status})`)
-  const details = await detailsResponse.json()
-
+  const details = await fetchTMDBDetailById("movie", tmdbId)
   const year = details.release_date ? details.release_date.substring(0, 4) : ""
-  const genres = details.genres ? details.genres.map(g => g.name) : []
-  let rating = details.vote_average || 0
-
-  if (details.imdb_id) {
-    try {
-      const imdbData = await (await fetch(`https://www.omdbapi.com/?i=${details.imdb_id}&apikey=${OMDB_API_KEY}`)).json()
-      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A") rating = parseFloat(imdbData.imdbRating)
-    } catch (error) {
-      console.warn("IMDb rating lookup failed; using TMDB rating instead.", error)
-    }
-  }
-
   return {
     tmdb_id: Number(details.id) || Number(tmdbId) || null,
     title: details.title || "",
     release_year: parseInt(year) || new Date().getFullYear(),
-    genre: genres.join(", "),
-    rating,
+    genre: (details.genres || []).map(genre => genre.name).join(", "),
+    rating: details.vote_average || 0,
     poster_url: details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
+    _imdbId: getIMDbId(details, "movie"),
   }
 }
 
 async function fetchSeriesInfoByTmdbId(tmdbId) {
-  const detailsUrl = `${TMDB_BASE_URL}/tv/${tmdbId}?api_key=${TMDB_API_KEY}&language=en-US`
-  const [detailsResponse, extIdsResponse] = await Promise.all([
-    fetch(detailsUrl),
-    fetch(`${TMDB_BASE_URL}/tv/${tmdbId}/external_ids?api_key=${TMDB_API_KEY}`),
-  ])
-  if (!detailsResponse.ok) throw new Error(`TMDB details failed (${detailsResponse.status})`)
-
-  const details = await detailsResponse.json()
-  const extIds = extIdsResponse.ok ? await extIdsResponse.json() : {}
+  const details = await fetchTMDBDetailById("series", tmdbId)
   const startYear = details.first_air_date ? details.first_air_date.substring(0, 4) : ""
   let endYear = details.last_air_date ? details.last_air_date.substring(0, 4) : ""
   if (details.status === "Returning Series") endYear = ""
-
-  const genres = details.genres ? details.genres.map(g => g.name) : []
-  let rating = details.vote_average || 0
-
-  if (extIds.imdb_id) {
-    try {
-      const imdbData = await (await fetch(`https://www.omdbapi.com/?i=${extIds.imdb_id}&apikey=${OMDB_API_KEY}`)).json()
-      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A") rating = parseFloat(imdbData.imdbRating)
-    } catch (error) {
-      console.warn("IMDb rating lookup failed; using TMDB rating instead.", error)
-    }
-  }
-
   const parsedStart = parseInt(startYear) || new Date().getFullYear()
-  const parsedEnd = endYear ? parseInt(endYear) : parsedStart
-
   return {
     tmdb_id: Number(details.id) || Number(tmdbId) || null,
     title: details.name || "",
     release_year: parsedStart,
-    end_year: parsedEnd,
+    end_year: endYear ? parseInt(endYear) : parsedStart,
     number_of_seasons: Math.max(1, parseInt(details.number_of_seasons) || 1),
-    genre: genres.join(", "),
-    rating,
+    genre: (details.genres || []).map(genre => genre.name).join(", "),
+    rating: details.vote_average || 0,
     poster_url: details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
+    _imdbId: getIMDbId(details, "series"),
   }
 }
+
+function enrichAddFormRating(info, mediaType, requestSerial) {
+  enrichIMDbRating(info, ratingInput, () =>
+    autoFillSearchRequestSerial === requestSerial &&
+    Number(tmdbIdInput?.value) === Number(info.tmdb_id) &&
+    mediaTypeSelect.value === mediaType &&
+    titleInput.value === info.title
+  )
+}
+
 
 function applyAutoFillInfo(info, mediaType) {
   titleInput.value = info.title
@@ -4700,11 +5028,14 @@ async function selectAutoFillResult(index) {
     const info = mediaType === "movie"
       ? await fetchMovieInfoByTmdbId(candidate.id)
       : await fetchSeriesInfoByTmdbId(candidate.id)
+    if (!autoFillCandidateSelectionPending ||
+        document.getElementById("auto-fill-results-modal")?.hidden) return
 
     mediaTypeSelect.value = mediaType
     updateEndYearVisibility()
     applyAutoFillInfo(info, mediaType)
     closeAutoFillResults()
+    enrichAddFormRating(info, mediaType, autoFillSearchRequestSerial)
     showToast(`"${info.title}" info loaded! ✨`, "success")
   } catch (error) {
     autoFillCandidateSelectionPending = false
@@ -4737,6 +5068,7 @@ async function fetchMediaInfo(preferredTmdbId = null) {
         : await fetchSeriesInfoByTmdbId(knownTmdbId)
       if (requestSerial !== autoFillSearchRequestSerial) return
       applyAutoFillInfo(info, preferredMediaType)
+      enrichAddFormRating(info, preferredMediaType, requestSerial)
       hideLoading()
       showToast(`"${info.title}" info loaded! ✨`, "success")
       return
@@ -4760,92 +5092,19 @@ async function fetchMediaInfo(preferredTmdbId = null) {
 }
 
 // ════════════════════════════════════════════════
-//  TMDB / OMDB  (unchanged original logic)
+//  TMDB / OMDB — cached fast lookup
 // ════════════════════════════════════════════════
 
 async function searchMovieInfo(searchTitle) {
-  try {
-    const cleanTitle = normalizeMediaSearchTitle(searchTitle)
-    const searchUrl = `${TMDB_BASE_URL}/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanTitle)}&language=en-US`
-    const response  = await fetch(searchUrl)
-    const data      = await response.json()
-
-    if (!data.results || data.results.length === 0) return null
-
-    const movie     = data.results[0]
-    const detailsUrl = `${TMDB_BASE_URL}/movie/${movie.id}?api_key=${TMDB_API_KEY}&language=en-US`
-    const details   = await (await fetch(detailsUrl)).json()
-
-    const year   = details.release_date ? details.release_date.substring(0,4) : ""
-    const genres = details.genres ? details.genres.map(g => g.name) : []
-    let rating   = details.vote_average || 0
-    const imdbId = details.imdb_id
-
-    if (imdbId) {
-      const imdbData = await (await fetch(`https://www.omdbapi.com/?i=${imdbId}&apikey=${OMDB_API_KEY}`)).json()
-      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A")
-        rating = parseFloat(imdbData.imdbRating)
-    }
-
-    return {
-      tmdb_id:      Number(details.id) || Number(movie.id) || null,
-      title:        details.title || "",
-      release_year: parseInt(year) || new Date().getFullYear(),
-      genre:        genres.join(", "),
-      rating,
-      poster_url:   details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
-    }
-  } catch(error) {
-    console.error("Error fetching movie info:", error)
-    throw error
-  }
+  const results = await fetchAutoFillSearchPage(normalizeMediaSearchTitle(searchTitle), "movie")
+  return results.length ? fetchMovieInfoByTmdbId(results[0].id) : null
 }
 
 async function searchSeriesInfo(searchTitle) {
-  try {
-    const cleanTitle = normalizeMediaSearchTitle(searchTitle)
-    const searchUrl = `${TMDB_BASE_URL}/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(cleanTitle)}&language=en-US`
-    const response  = await fetch(searchUrl)
-    const data      = await response.json()
-
-    if (!data.results || data.results.length === 0) return null
-
-    const serie     = data.results[0]
-    const detailsUrl = `${TMDB_BASE_URL}/tv/${serie.id}?api_key=${TMDB_API_KEY}&language=en-US`
-    const details   = await (await fetch(detailsUrl)).json()
-
-    const startYear = details.first_air_date ? details.first_air_date.substring(0,4) : ""
-    let endYear     = details.last_air_date  ? details.last_air_date.substring(0,4)  : ""
-    if (details.status === "Returning Series") endYear = ""
-
-    const genres = details.genres ? details.genres.map(g => g.name) : []
-    let rating   = details.vote_average || 0
-
-    const extIds = await (await fetch(`${TMDB_BASE_URL}/tv/${serie.id}/external_ids?api_key=${TMDB_API_KEY}`)).json()
-    if (extIds.imdb_id) {
-      const imdbData = await (await fetch(`https://www.omdbapi.com/?i=${extIds.imdb_id}&apikey=${OMDB_API_KEY}`)).json()
-      if (imdbData.imdbRating && imdbData.imdbRating !== "N/A")
-        rating = parseFloat(imdbData.imdbRating)
-    }
-
-    const parsedStart = parseInt(startYear) || new Date().getFullYear()
-    const parsedEnd   = endYear ? parseInt(endYear) : parsedStart
-
-    return {
-      tmdb_id:      Number(details.id) || Number(serie.id) || null,
-      title:        details.name || "",
-      release_year: parsedStart,
-      end_year:     parsedEnd,
-      number_of_seasons: Math.max(1, parseInt(details.number_of_seasons) || 1),
-      genre:        genres.join(", "),
-      rating,
-      poster_url:   details.poster_path ? `${TMDB_IMAGE_URL}${details.poster_path}` : null,
-    }
-  } catch(error) {
-    console.error("Error fetching series info:", error)
-    throw error
-  }
+  const results = await fetchAutoFillSearchPage(normalizeMediaSearchTitle(searchTitle), "series")
+  return results.length ? fetchSeriesInfoByTmdbId(results[0].id) : null
 }
+
 
 // ════════════════════════════════════════════════
 //  EDIT
@@ -4969,12 +5228,18 @@ async function fetchEditInfo() {
   if (title !== rawTitle) editTitleInput.value = title
 
   const mediaType = editMediaTypeInput.value
+  const editOrderAtRequest = editOrderInput.value
   showLoading()
 
   try {
     const info = mediaType === "movie"
       ? await searchMovieInfo(title)
       : await searchSeriesInfo(title)
+    if (editModal.style.display !== "flex" || editOrderInput.value !== editOrderAtRequest ||
+        editTitleInput.value !== title || editMediaTypeInput.value !== mediaType) {
+      hideLoading()
+      return
+    }
 
     hideLoading()
     if (!info) { showToast("No info found.", "info"); return }
@@ -4994,6 +5259,14 @@ async function fetchEditInfo() {
       editPosterImage.src = info.poster_url
       syncPosterPreview(editPosterImage, editPosterPlaceholder, editRemovePosterBtn)
     }
+    const editedOrder = editOrderInput.value
+    enrichIMDbRating(info, editRatingInput, () =>
+      editModal.style.display === "flex" &&
+      editOrderInput.value === editedOrder &&
+      editMediaTypeInput.value === mediaType &&
+      Number(editTmdbIdInput?.value) === Number(info.tmdb_id) &&
+      editTitleInput.value === info.title
+    )
 
     showToast(`Info loaded for "${info.title}"!`, "success")
   } catch(error) {
@@ -5188,171 +5461,6 @@ function escapeHtml(str) {
 document.addEventListener("DOMContentLoaded", init)
 
 // ════════════════════════════════════════════════
-//  ACCOUNT PROFILE — server-persisted for each authenticated user
-// ════════════════════════════════════════════════
-let pendingProfileAvatar = undefined // undefined = unchanged, null = remove, string = new image
-let profilePhotoRequest = 0
-
-function updateAvatarElement(container, letterId, imageId, user, avatarOverride) {
-  if (!container) return
-  const letter = document.getElementById(letterId)
-  const image = document.getElementById(imageId)
-  const name = String(user?.display_name || user?.username || "U").trim()
-  if (letter) letter.textContent = (name.charAt(0) || "U").toUpperCase()
-  const source = avatarOverride !== undefined ? avatarOverride : user?.avatar_url
-  const validSource = typeof source === "string" && /^data:image\/(?:jpeg|png|webp);base64,/.test(source)
-  if (image) {
-    if (validSource) image.src = source
-    else image.removeAttribute("src")
-    image.hidden = !validSource
-  }
-  if (letter) letter.hidden = Boolean(validSource)
-}
-
-function showProfileStatus(message = "", type = "") {
-  const status = document.getElementById("profile-status")
-  if (!status) return
-  status.textContent = message
-  status.hidden = !message
-  status.className = `profile-status ${type ? `is-${type}` : ""}`.trim()
-}
-
-function syncProfileForm() {
-  if (!currentUser) return
-  ++profilePhotoRequest
-  pendingProfileAvatar = undefined
-  const fieldValues = {
-    "profile-display-name": currentUser.display_name || "",
-    "profile-username": currentUser.username || "",
-    "profile-email": currentUser.email || "",
-  }
-  for (const [fieldId, value] of Object.entries(fieldValues)) {
-    const field = document.getElementById(fieldId)
-    if (field) field.value = value
-  }
-  const input = document.getElementById("profile-photo-file")
-  if (input) input.value = ""
-  updateAvatarElement(document.getElementById("profile-portrait"), "profile-avatar-letter", "profile-avatar-image", currentUser)
-  showProfileStatus()
-}
-
-async function shrinkProfileImage(file) {
-  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 8 * 1024 * 1024) {
-    throw new Error("Choose a JPG, PNG or WebP image smaller than 8 MB")
-  }
-  const url = URL.createObjectURL(file)
-  try {
-    const original = new Image()
-    await new Promise((resolve, reject) => {
-      original.onload = resolve
-      original.onerror = () => reject(new Error("Could not read this image"))
-      original.src = url
-    })
-    const canvas = document.createElement("canvas")
-    canvas.width = canvas.height = 320
-    const ctx = canvas.getContext("2d")
-    if (!ctx) throw new Error("Image processing is unavailable")
-    const side = Math.min(original.naturalWidth, original.naturalHeight)
-    ctx.drawImage(original,
-      (original.naturalWidth - side) / 2, (original.naturalHeight - side) / 2, side, side,
-      0, 0, 320, 320)
-    for (const quality of [.88, .75, .62, .48]) {
-      const result = canvas.toDataURL("image/jpeg", quality)
-      if (result.length < 460_000) return result
-    }
-    throw new Error("This image is too large after resizing")
-  } finally {
-    URL.revokeObjectURL(url)
-  }
-}
-
-function migrateProfileSnapshots(previous, next) {
-  if (!previous || !next || previous.toLowerCase() === next.toLowerCase()) return
-  for (const prefix of [COLLECTION_SNAPSHOT_PREFIX, RECOMMENDATION_SNAPSHOT_PREFIX]) {
-    const oldKey = `${prefix}:${previous.toLowerCase()}`
-    const newKey = `${prefix}:${next.toLowerCase()}`
-    try {
-      const saved = localStorage.getItem(oldKey)
-      if (saved) localStorage.setItem(newKey, saved)
-      localStorage.removeItem(oldKey)
-    } catch (_) { /* cache failures must not stop a profile save */ }
-  }
-}
-
-async function saveProfile(event) {
-  event.preventDefault()
-  if (!currentUser) return
-  const username = document.getElementById("profile-username")?.value.trim().replace(/^@/, "").toLowerCase() || ""
-  const display_name = document.getElementById("profile-display-name")?.value.trim() || ""
-  const email = document.getElementById("profile-email")?.value.trim().toLowerCase() || ""
-  if (!USERNAME_PATTERN.test(username)) {
-    showProfileStatus("Username must contain 3–20 lowercase letters, numbers or underscores.", "error")
-    return
-  }
-  if (display_name.length > 60 || !/^\S+@\S+\.\S+$/.test(email)) {
-    showProfileStatus("Check the name and email address before saving.", "error")
-    return
-  }
-  const payload = { username, display_name, email }
-  if (pendingProfileAvatar !== undefined) payload.avatar_url = pendingProfileAvatar
-  const saveButton = document.getElementById("profile-save")
-  if (saveButton) saveButton.disabled = true
-  showProfileStatus("Saving your profile…")
-  try {
-    const response = await fetch(`${AUTH_BASE_URL}/profile`, {
-      method: "PATCH", headers: authHeaders(), body: JSON.stringify(payload),
-    })
-    const result = await response.json()
-    if (response.status === 401) { handleUnauthorized(); switchView("collection"); return }
-    if (!response.ok || !result.user) throw new Error(result.error || "Could not save profile")
-    const previousUsername = currentUser.username
-    migrateProfileSnapshots(previousUsername, result.user.username)
-    if (result.token) setToken(result.token)
-    currentUser = { ...currentUser, ...result.user, token: result.token || getToken() }
-    localStorage.setItem("cinema_username", currentUser.username)
-    pendingProfileAvatar = undefined
-    updateAuthUI(currentUser)
-    syncSocialProfileUI()
-    updateAvatarElement(document.getElementById("profile-portrait"), "profile-avatar-letter", "profile-avatar-image", currentUser)
-    showProfileStatus("Your profile has been saved successfully.", "success")
-    showToast("Profile saved", "success")
-  } catch (error) {
-    showProfileStatus(error.message || "Could not save your changes. Try again.", "error")
-  } finally {
-    if (saveButton) saveButton.disabled = false
-  }
-}
-
-function initProfileUI() {
-  document.getElementById("profile-form")?.addEventListener("submit", saveProfile)
-  document.getElementById("profile-reset")?.addEventListener("click", syncProfileForm)
-  document.getElementById("profile-photo-change")?.addEventListener("click", () => {
-    document.getElementById("profile-photo-file")?.click()
-  })
-  document.getElementById("profile-photo-remove")?.addEventListener("click", () => {
-    ++profilePhotoRequest
-    pendingProfileAvatar = null
-    updateAvatarElement(document.getElementById("profile-portrait"), "profile-avatar-letter", "profile-avatar-image", currentUser, null)
-    showProfileStatus()
-  })
-  document.getElementById("profile-photo-file")?.addEventListener("change", async event => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    const serial = ++profilePhotoRequest
-    showProfileStatus("Optimizing your new photo…")
-    try {
-      const avatar = await shrinkProfileImage(file)
-      if (serial !== profilePhotoRequest) return
-      pendingProfileAvatar = avatar
-      updateAvatarElement(document.getElementById("profile-portrait"), "profile-avatar-letter", "profile-avatar-image", currentUser, avatar)
-      showProfileStatus()
-    } catch (error) {
-      if (serial === profilePhotoRequest) showProfileStatus(error.message, "error")
-    }
-  })
-}
-
-// ════════════════════════════════════════════════
 //  AUTH SYSTEM
 // ════════════════════════════════════════════════
 
@@ -5373,9 +5481,9 @@ async function restoreSession() {
       currentUser = { token, ...data }
       localStorage.setItem("cinema_username", data.username)
       updateAuthUI(currentUser)
-      if (document.getElementById("view-profile")?.style.display === "block") syncProfileForm()
       syncSocialProfileUI()
       updateSocialRequestBadge(Number(data.pending_requests_count) || 0)
+      scheduleRecommendationPrewarm()
     } else {
       handleUnauthorized()
     }
@@ -5396,9 +5504,8 @@ function updateAuthUI(user) {
   if (user) {
     if (guestBtn) guestBtn.style.display = "none"
     if (userPill) userPill.style.display = "flex"
-    if (userAvatar) updateAvatarElement(userAvatar, "user-avatar-letter", "user-avatar-image", user)
+    renderAccountAvatar(userAvatar, user)
     if (userLabel) userLabel.textContent = user.display_name || `@${user.username}`
-    document.getElementById("profile-open-btn")?.setAttribute("title", `Open @${user.username}'s profile`)
     if (guestBanner) guestBanner.style.display = "none"
     if (navAdd) navAdd.style.opacity = "1"
     if (navForYou) navForYou.style.opacity = "1"
@@ -5416,6 +5523,7 @@ function updateAuthUI(user) {
 
 // ── Handle expired / invalid token ──
 function handleUnauthorized() {
+  clearRecommendationPoll()
   clearCollectionSnapshot()
   clearToken()
   currentUser = null
@@ -5424,6 +5532,197 @@ function handleUnauthorized() {
   updateAuthUI(null)
   showToast("Session expired — please sign in again", "info")
 }
+
+// ════════════════════════════════════════════════
+//  ACCOUNT PROFILE — authenticated, persisted on the backend
+// ════════════════════════════════════════════════
+let pendingAccountAvatar = null
+let accountAvatarDirty = false
+let accountUploadingAvatar = false
+
+function renderAccountAvatar(element, user) {
+  if (!element) return
+  element.replaceChildren()
+  const avatar = user?.avatar_data
+  if (typeof avatar === "string" && /^data:image\/(?:jpeg|png|webp);base64,/.test(avatar)) {
+    const image = document.createElement("img")
+    image.src = avatar
+    image.alt = ""
+    image.className = "account-avatar-image"
+    element.appendChild(image)
+  } else {
+    element.textContent = String(user?.display_name || user?.username || "U").trim().charAt(0).toUpperCase()
+  }
+}
+
+function renderAccountPhotoPreview() {
+  const avatar = pendingAccountAvatar
+  const image = document.getElementById("account-photo-image")
+  const initial = document.getElementById("account-photo-initial")
+  const remove = document.getElementById("account-avatar-remove")
+  if (!image || !initial) return
+  if (avatar) {
+    image.src = avatar
+    image.hidden = false
+    initial.hidden = true
+  } else {
+    image.removeAttribute("src")
+    image.hidden = true
+    initial.hidden = false
+    initial.textContent = String(document.getElementById("account-display-name")?.value || currentUser?.username || "U").trim().charAt(0).toUpperCase()
+  }
+  if (remove) remove.disabled = !avatar
+}
+
+function syncAccountProfileView() {
+  if (!currentUser) return
+  const get = id => document.getElementById(id)
+  if (get("account-display-name")) get("account-display-name").value = currentUser.display_name || ""
+  if (get("account-username")) get("account-username").value = currentUser.username || ""
+  if (get("account-email")) get("account-email").value = currentUser.email || ""
+  if (get("account-preview-name")) get("account-preview-name").textContent = currentUser.display_name || currentUser.username || "Your name"
+  if (get("account-preview-handle")) get("account-preview-handle").textContent = `@${currentUser.username || "username"}`
+  const joinedAt = new Date(currentUser.created_at || "")
+  if (get("account-joined")) get("account-joined").textContent = Number.isFinite(joinedAt.getTime())
+    ? `Member since ${joinedAt.toLocaleDateString(undefined, { month: "long", year: "numeric" })}` : "Your personal media vault"
+  for (const id of ["account-current-password", "account-new-password", "account-confirm-password"]) {
+    if (get(id)) get(id).value = ""
+  }
+  if (get("account-avatar-file")) get("account-avatar-file").value = ""
+  if (get("account-form-message")) get("account-form-message").hidden = true
+  pendingAccountAvatar = currentUser.avatar_data || null
+  accountAvatarDirty = false
+  renderAccountPhotoPreview()
+}
+
+async function optimizeAccountPhoto(file) {
+  if (!file || !["image/jpeg", "image/png", "image/webp"].includes(file.type)) throw new Error("Choose a JPG, PNG or WebP photo")
+  if (file.size > 5 * 1024 * 1024) throw new Error("Photo must be 5 MB or less")
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const photo = new Image()
+      photo.onload = () => resolve(photo)
+      photo.onerror = () => reject(new Error("This image could not be opened"))
+      photo.src = objectUrl
+    })
+    const canvas = document.createElement("canvas")
+    canvas.width = canvas.height = 320
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("Photo processing is not supported here")
+    const size = Math.min(img.naturalWidth, img.naturalHeight)
+    if (!size) throw new Error("Invalid photo size")
+    ctx.drawImage(img, (img.naturalWidth - size) / 2, (img.naturalHeight - size) / 2, size, size, 0, 0, 320, 320)
+    for (const quality of [0.82, 0.68, 0.48]) {
+      let data = canvas.toDataURL("image/webp", quality)
+      if (!data.startsWith("data:image/webp")) data = canvas.toDataURL("image/jpeg", quality)
+      if (data.length < 390_000) return data
+    }
+    throw new Error("Photo is too large to save; try a smaller image")
+  } finally { URL.revokeObjectURL(objectUrl) }
+}
+
+function setAccountFormMessage(message, isError = false) {
+  const element = document.getElementById("account-form-message")
+  if (!element) return
+  element.textContent = message
+  element.classList.toggle("is-error", isError)
+  element.hidden = !message
+}
+
+async function saveAccountProfile(event) {
+  event.preventDefault()
+  if (!currentUser || accountUploadingAvatar) return
+  const get = id => document.getElementById(id)
+  const username = String(get("account-username")?.value || "").trim().replace(/^@+/, "").toLowerCase()
+  const email = String(get("account-email")?.value || "").trim().toLowerCase()
+  const displayName = String(get("account-display-name")?.value || "").trim()
+  const currentPassword = get("account-current-password")?.value || ""
+  const newPassword = get("account-new-password")?.value || ""
+  const confirmPassword = get("account-confirm-password")?.value || ""
+  if (!/^[a-z0-9_]{3,20}$/.test(username)) return setAccountFormMessage("Username must be 3–20 lowercase letters, numbers or underscores", true)
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) return setAccountFormMessage("Enter a valid email address", true)
+  if (displayName.length > 50) return setAccountFormMessage("Display name is too long", true)
+  if (newPassword && (newPassword.length < 8 || newPassword !== confirmPassword || !currentPassword)) {
+    return setAccountFormMessage("To change your password, enter the current password and confirm the new password (at least 8 characters)", true)
+  }
+  if (!newPassword && (currentPassword || confirmPassword)) return setAccountFormMessage("Enter a new password, or clear the password fields", true)
+  const btn = get("account-save-btn")
+  if (btn) { btn.disabled = true; btn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Saving…` }
+  setAccountFormMessage("")
+  try {
+    const oldCollectionKey = getCollectionSnapshotKey()
+    const oldRecKey = getRecommendationSnapshotKey()
+    const oldUsername = currentUser.username
+    const changes = { display_name: displayName, username, email }
+    if (accountAvatarDirty) changes.avatar_data = pendingAccountAvatar
+    if (newPassword) { changes.current_password = currentPassword; changes.new_password = newPassword }
+    const response = await fetch(`${AUTH_BASE_URL}/profile`, {
+      method: "PATCH", headers: authHeaders(), body: JSON.stringify(changes),
+    })
+    if (response.status === 401) { handleUnauthorized(); return }
+    const result = await response.json()
+    if (!response.ok || !result.success) throw new Error(result.error || "Could not update profile")
+    if (result.token) setToken(result.token)
+    currentUser = { ...currentUser, ...result.user, token: result.token || getToken() }
+    localStorage.setItem("cinema_username", currentUser.username)
+    // Snapshots follow the account if its public handle changes; all server data
+    // stays attached to the same immutable user ID.
+    if (oldUsername !== currentUser.username) {
+      try {
+        const collection = localStorage.getItem(oldCollectionKey)
+        const recommendations = localStorage.getItem(oldRecKey)
+        if (collection) localStorage.setItem(getCollectionSnapshotKey(), collection)
+        if (recommendations) localStorage.setItem(getRecommendationSnapshotKey(), recommendations)
+        localStorage.removeItem(oldCollectionKey)
+        localStorage.removeItem(oldRecKey)
+      } catch (_) {}
+    }
+    updateAuthUI(currentUser)
+    syncSocialProfileUI()
+    syncAccountProfileView()
+    setAccountFormMessage("Your profile was saved successfully")
+    showToast("Profile updated successfully", "success")
+  } catch (error) {
+    setAccountFormMessage(error.message || "Could not save changes", true)
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = `<i class="fas fa-floppy-disk"></i> Save changes` }
+  }
+}
+
+function initAccountProfile() {
+  const fileInput = document.getElementById("account-avatar-file")
+  document.getElementById("account-avatar-choose")?.addEventListener("click", () => fileInput?.click())
+  document.getElementById("account-avatar-remove")?.addEventListener("click", () => {
+    pendingAccountAvatar = null
+    accountAvatarDirty = true
+    if (fileInput) fileInput.value = ""
+    renderAccountPhotoPreview()
+  })
+  fileInput?.addEventListener("change", async () => {
+    const file = fileInput.files?.[0]
+    if (!file) return
+    accountUploadingAvatar = true
+    try {
+      pendingAccountAvatar = await optimizeAccountPhoto(file)
+      accountAvatarDirty = true
+      renderAccountPhotoPreview()
+      setAccountFormMessage("Save your changes to keep this photo on your account")
+    } catch (error) { setAccountFormMessage(error.message, true) }
+    finally { accountUploadingAvatar = false; fileInput.value = "" }
+  })
+  document.getElementById("account-display-name")?.addEventListener("input", event => {
+    const preview = document.getElementById("account-preview-name")
+    if (preview) preview.textContent = event.target.value.trim() || currentUser?.username || "Your name"
+    if (!pendingAccountAvatar) renderAccountPhotoPreview()
+  })
+  document.getElementById("account-username")?.addEventListener("input", event => {
+    const preview = document.getElementById("account-preview-handle")
+    if (preview) preview.textContent = `@${event.target.value.trim()}`
+  })
+  document.getElementById("account-profile-form")?.addEventListener("submit", saveAccountProfile)
+}
+document.addEventListener("DOMContentLoaded", initAccountProfile)
 
 // ── Open / close auth modal ──
 function openAuthModal(tab = "login") {
@@ -5519,10 +5818,10 @@ async function submitLogin() {
       updateAuthUI(currentUser)
       syncSocialProfileUI()
       void refreshSocialRequestBadge()
+      scheduleRecommendationPrewarm()
       closeAuthModal()
       showToast(`Welcome back, ${data.username}! 🎬`, "success")
       await searchMedia()
-      warmRecommendationFeed()
     }
   } catch {
     showAuthError(errEl, "Network error — please try again")
@@ -5586,10 +5885,10 @@ async function submitRegister() {
       _cacheInvalidate()
       updateAuthUI(currentUser)
       syncSocialProfileUI()
+      scheduleRecommendationPrewarm()
       closeAuthModal()
       showToast(`Account created! Welcome, @${data.username} 🎉`, "success")
       await searchMedia()
-      warmRecommendationFeed()
     }
   } catch {
     showAuthError(errEl, "Network error — please try again")
@@ -5602,6 +5901,7 @@ window.submitRegister = submitRegister
 
 // ── Logout ──
 function logout() {
+  clearRecommendationPoll()
   clearCollectionSnapshot()
   clearToken()
   currentUser = null
@@ -5866,7 +6166,7 @@ function syncSocialProfileUI() {
   const usernameEl = document.getElementById("social-profile-username")
   const avatar = document.getElementById("social-profile-avatar")
   if (usernameEl) usernameEl.textContent = `@${username}`
-  if (avatar) avatar.textContent = username.charAt(0).toUpperCase()
+  renderAccountAvatar(avatar, currentUser)
   const discoverable = document.getElementById("setting-discoverable")
   const requests = document.getElementById("setting-friend-requests")
   if (discoverable) discoverable.checked = currentUser?.discoverable !== false
@@ -6300,7 +6600,7 @@ function renderSharingTitlePicker() {
     const token = sharingMediaToken(item)
     const selected = socialState.permissionSelected.has(token)
     const poster = item.poster_url
-      ? `<img src="${escapeHtml(item.poster_url)}" alt="" loading="lazy">`
+      ? `<img src="${escapeHtml(mediaImageSize(item.poster_url, 185))}" alt="" loading="lazy" decoding="async">`
       : `<span class="sharing-title-placeholder"><i class="fas fa-${item.media_type === "series" ? "tv" : "film"}"></i></span>`
     return `<button type="button" class="sharing-title-card${selected ? " selected" : ""}" data-sharing-token="${escapeHtml(token)}" onclick="toggleSharingTitle('${escapeHtml(token)}')" aria-pressed="${selected}">
       <span class="sharing-title-poster">${poster}<i class="fas fa-check"></i></span>
@@ -6550,7 +6850,7 @@ function buildSharedMediaCard(item) {
   const rating = item.rating === null ? "Private" : `★ ${Number(item.rating || 0).toFixed(1)}`
   card.innerHTML = `
     <div class="shared-media-poster">
-      ${hasPoster ? `<img src="${escapeHtml(item.poster_url)}" alt="${escapeHtml(item.title)}" loading="lazy">` : `<div class="shared-media-placeholder"><i class="fas fa-${item.media_type === "movie" ? "film" : "tv"}"></i></div>`}
+      ${hasPoster ? `<img src="${escapeHtml(mediaImageSize(item.poster_url, 342))}" alt="${escapeHtml(item.title)}" loading="lazy" decoding="async">` : `<div class="shared-media-placeholder"><i class="fas fa-${item.media_type === "movie" ? "film" : "tv"}"></i></div>`}
       <div class="shared-media-badges"><span>${escapeHtml(item.display_year)}</span><span>${escapeHtml(rating)}</span></div>
       ${item.watch_status ? `<div class="shared-media-status"><i class="fas fa-${item.watch_status === "watching" ? "play" : "circle-check"}"></i> ${escapeHtml(item.watch_status.replace(/_/g, " "))}${item.favorite ? " • ♥" : ""}</div>` : item.favorite ? `<div class="shared-media-status"><i class="fas fa-heart"></i> Favorite</div>` : ""}
     </div>
